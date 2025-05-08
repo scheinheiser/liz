@@ -1,27 +1,33 @@
 ; Liz
 ; This is a comment.
 
-; (var *ident* *type* *value*)
-(var four Int 4)
+; (var *ident* *optional type* *value*)
+(var four 4) ; inferred Int
+(var forty Int undefined)
 (var hello String "World")
 (var no-value Bool undefined) ; this is treated like 'nil' in other languages.
 
-; (const *ident* *maybe optional type* value)
-(const pi 3.141592)
-(const tau Float 6.283185)
+; (set *declared variable* *new value*)
+; It must have the same type of the previous value.
+(set no-value False)
+(set forty (* four 10))
 
-; (func *ident* *args* *body*)
-(func increment (number) 
-  (return (+ number 1))
-)
+; (const *ident* *optional type* value)
+(const pi 3.141592) ; inferred type
+(const tau Float 6.283185) ; explicit typing
 
-(func decrement (number: Int) 
-  (return (- number 1))
-)
+; (func *ident* *args* *return type* *body*)
+(func increment [number ~ Int] > Int
+  (+ number 1)) ; the last executed sexpr's value is returned.
 
-(func add_hello (str: String) 
-  (const with_hello (++ "hello " str))
-  (return with_hello)
-)
+(func decrement [number ~ Int] > Int
+  (- number 1))
+
+(func say_hi [name ~ String] > String
+  (const with_hello (++ "hello " name))
+  (return with_hello)) ; you can have an explicit return for variables.
+
+(func concat [s1 ~ String, s2 ~ String] > String
+  (++ s1 s2))
 
 (print (== 4 (decrement (increment 4)))) ; would print "True"

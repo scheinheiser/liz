@@ -3,7 +3,7 @@
 
 module Main where
 
-import Parser
+import Liz.Parser
 import Data.String ( IsString (..))
 import qualified Data.Text as T
 import Control.Monad (void)

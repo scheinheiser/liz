@@ -23,6 +23,9 @@
 (func decrement [number ~ Int] > Int
   (- number 1))
 
+(func flip [b ~ Bool] > Bool 
+  (not b))
+
 (func say_hi [name ~ String] > String
   (const with_hello (++ "hello " name))
   (return with_hello)) ; you can have an explicit return for variables.

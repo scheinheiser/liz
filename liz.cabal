@@ -18,7 +18,7 @@ common warnings
 executable liz
     import:           warnings
     main-is:          Main.hs
-    other-modules: Parser
+    other-modules: Liz.Parser
     other-extensions: OverloadedStrings, NamedDefaults
     build-depends:    base ^>=4.21.0.0, megaparsec, text
     hs-source-dirs:   app

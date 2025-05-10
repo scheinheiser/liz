@@ -1,6 +1,7 @@
 cabal-version:      3.0
 name:               liz
 version:            0.1.0.0
+
 -- synopsis:
 -- description:
 license:            BSD-3-Clause
@@ -18,18 +19,18 @@ common warnings
 executable liz
     import:           warnings
     main-is:          Main.hs
-    other-modules: Liz.Parser
+    other-modules:    Liz.Parser
     other-extensions: OverloadedStrings, NamedDefaults
-    build-depends:    base ^>=4.21.0.0, megaparsec, text
+    build-depends:    base ^>=4.21.0.0, megaparsec >= 9.6.0, text >= 2.1
     hs-source-dirs:   app
     default-language: GHC2024
 
 test-suite liz-test
     import:           warnings
     default-language: GHC2024
-    -- other-modules:
-    -- other-extensions:
+    other-modules: Liz.Parser
+    other-extensions: OverloadedStrings, NamedDefaults
     type:             exitcode-stdio-1.0
-    hs-source-dirs:   test
+    hs-source-dirs:   test, app
     main-is:          Main.hs
-    build-depends: base ^>=4.21.0.0
+    build-depends: base ^>=4.21.0.0, hspec >= 2.11.0, hspec-megaparsec >= 2.0.0, megaparsec >= 9.6.0, text >= 2.1

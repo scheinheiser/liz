@@ -20,6 +20,46 @@
   (major1) == 4 && (major2) <  21 || \
   (major1) == 4 && (major2) == 21 && (minor) <= 0)
 #endif /* MIN_VERSION_base */
+/* package hspec-2.11.12 */
+#ifndef VERSION_hspec
+#define VERSION_hspec "2.11.12"
+#endif /* VERSION_hspec */
+#ifndef MIN_VERSION_hspec
+#define MIN_VERSION_hspec(major1,major2,minor) (\
+  (major1) <  2 || \
+  (major1) == 2 && (major2) <  11 || \
+  (major1) == 2 && (major2) == 11 && (minor) <= 12)
+#endif /* MIN_VERSION_hspec */
+/* package hspec-megaparsec-2.2.1 */
+#ifndef VERSION_hspec_megaparsec
+#define VERSION_hspec_megaparsec "2.2.1"
+#endif /* VERSION_hspec_megaparsec */
+#ifndef MIN_VERSION_hspec_megaparsec
+#define MIN_VERSION_hspec_megaparsec(major1,major2,minor) (\
+  (major1) <  2 || \
+  (major1) == 2 && (major2) <  2 || \
+  (major1) == 2 && (major2) == 2 && (minor) <= 1)
+#endif /* MIN_VERSION_hspec_megaparsec */
+/* package megaparsec-9.7.0 */
+#ifndef VERSION_megaparsec
+#define VERSION_megaparsec "9.7.0"
+#endif /* VERSION_megaparsec */
+#ifndef MIN_VERSION_megaparsec
+#define MIN_VERSION_megaparsec(major1,major2,minor) (\
+  (major1) <  9 || \
+  (major1) == 9 && (major2) <  7 || \
+  (major1) == 9 && (major2) == 7 && (minor) <= 0)
+#endif /* MIN_VERSION_megaparsec */
+/* package text-2.1.2 */
+#ifndef VERSION_text
+#define VERSION_text "2.1.2"
+#endif /* VERSION_text */
+#ifndef MIN_VERSION_text
+#define MIN_VERSION_text(major1,major2,minor) (\
+  (major1) <  2 || \
+  (major1) == 2 && (major2) <  1 || \
+  (major1) == 2 && (major2) == 1 && (minor) <= 2)
+#endif /* MIN_VERSION_text */
 
 /* tool gcc-17.0.0 */
 #ifndef TOOL_VERSION_gcc

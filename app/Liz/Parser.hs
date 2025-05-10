@@ -4,18 +4,26 @@
 module Liz.Parser where
 
 import Data.String ( IsString (..))
-import Data.Char (isAlphaNum, isDigit)
-import Control.Applicative (liftA3)
+import Data.Char (isAlphaNum, isDigit, isLetter)
+
 import qualified Data.Text as T
-import Control.Monad (void)
-import Text.Megaparsec
+import Text.Printf (printf)
+
+import Text.Megaparsec hiding (count)
 import Text.Megaparsec.Char
-import qualified Text.Megaparsec.Char.Lexer as L
+-- import qualified Text.Megaparsec.Char.Lexer as L
+
 import Data.Void (Void)
 
 default IsString (T.Text)
 type Parser = Parsec Void T.Text
-type Identifier = T.Text
+
+data Type = Int'
+  | Float'
+  | String'
+  | Char'
+  | Bool'
+  deriving (Show, Eq)
 
 data BinOp = Plus
   | Minus
@@ -27,70 +35,113 @@ data UnOp = Negate
   | Not
   deriving (Show, Eq)
 
-data SExpr = SEIdentifier T.Text
-  | SEString T.Text
-  | SEChar T.Text
-  | SEInt T.Text
-  | SEFloat T.Text
+data SExpr = SELiteral T.Text
   -- | SEFunc Func
-  | SEType T.Text
+  | SEType Type
+  | SEVar T.Text SExpr SExpr -- ident - type - value
+  | SEConst T.Text SExpr SExpr
   | SEBinary BinOp SExpr SExpr
   | SEUnary UnOp SExpr
   deriving (Show, Eq)
 
-seTypes :: [T.Text]
-seTypes = ["Int", "Float", "String", "Char", "Bool"]
+lizTypes :: [T.Text]
+lizTypes = ["Int", "Float", "String", "Char", "Bool"]
 
-seReserved :: [T.Text]
-seReserved = ["var", "set", "const", "if", "func"]
+lizReserved :: [T.Text]
+lizReserved = ["var", "set", "const", "if", "func", "False", "True", "undefined"]
 
-parseKeywordFromList :: [T.Text] -> Parser SExpr
-parseKeywordFromList = (pure . SEType =<<) . aux
-  where
-    aux :: [T.Text] -> Parser T.Text
-    aux xs = foldr1 (<|>) $ string <$> xs
+fromLiteral :: T.Text -> Parser SExpr
+fromLiteral t = case t of
+  "Int"     -> pure $ SEType Int'
+  "Float"   -> pure $ SEType Float'
+  "String"  -> pure $ SEType String'
+  "Char"    -> pure $ SEType Char'
+  "Bool"    -> pure $ SEType Bool'
+  _ -> fail "Reached unreachable in 'fromLiteral'."
 
-parseIdent :: Parser SExpr
+parseFromList :: [T.Text] -> Parser T.Text
+parseFromList = foldr1 (<|>) . map (string)
+
+parseIdent :: Parser T.Text
 parseIdent = do
   i <- (:) <$> letterChar <*> (some $ alphaNumChar <|> char '-' <|> char '_')
-  return $ SEIdentifier (T.pack i)
+  pure $ T.pack i
 
-parseStr :: Parser SExpr 
+parseStr :: Parser T.Text
 parseStr = do
-  _ <- char '"'
+  d1 <- char '"'
   str <- takeWhile1P (Just "alpha numeric character.") valid 
-  _ <- char '"'
-  return $ SEString str
+  d2 <- char '"'
+  pure $ (d1 T.:< str) T.:> d2
   where
     valid :: Char -> Bool
     valid = liftA2 (||) isAlphaNum ((==) ' ')
 
-parseChar :: Parser SExpr
+parseChar :: Parser T.Text
 parseChar = do
-  _ <- char '\''
+  d1 <- char '\''
   c <- printChar
-  _ <- char '\''
-  (return . SEChar) $ T.pack [c]
+  d2 <- char '\''
+  pure $ T.pack [d1, c, d2]
 
-parseNum :: Parser SExpr
+parseNum :: Parser T.Text
 parseNum = do
   n <- takeWhile1P (Just "digits 0-9 or '.'.") valid
-  if '.' `elem` (T.unpack n)
-  then return $ SEFloat n
-  else return $ SEInt n
+  pure n
   where
     valid :: Char -> Bool
     valid = liftA2 (||) isDigit ((==) '.') 
 
--- (var *ident* *optional type* *value*)
+parseBool :: Parser T.Text
+parseBool = do
+  b <- takeWhile1P (Just "letter") isLetter
+  pure b
+
+parseValue :: Parser T.Text
+parseValue = parseStr <|> parseChar <|> parseNum <|> parseBool
+
+-- (var *ident* *type* *value*)
 -- (var hello String "World")
 -- (var four 4) ; inferred Int
 parseVarDecl :: Parser SExpr
 parseVarDecl = do
   k <- string "var" <|> string "const"
-  hspace1
-  ty <- lookAhead $ (parseKeywordFromList seTypes) <|> parseIdent
-  return $ SEIdentifier "unfinished"
+  _ <- char ' ' 
+  ident <- parseIdent
+  if ident `elem` lizReserved
+  then fail $ printf "Expected identifier, found keyword '%s'" ident
+  else do
+    _ <- char ' ' 
+    ty <- try $ (parseFromList lizTypes) <|> parseValue
+    aux k ident ty
+  where
+    aux decl identifier typeOrVal
+      | typeOrVal `elem` lizTypes = do
+        _ <- char ' '
+        value <- parseValue
+        ty <- fromLiteral typeOrVal
+        pure $ (pickDecl' decl) identifier ty (SELiteral value)
+      | otherwise = do
+        (inferType $ T.unpack typeOrVal) >>= \ty -> do 
+          t <- fromLiteral ty
+          pure $ (pickDecl' decl) identifier t (SELiteral typeOrVal)
+
+    pickDecl' decl
+      | decl == "var" = SEVar
+      | decl == "const" = SEConst
+
+    inferType :: String -> Parser T.Text
+    inferType v
+      | (and . map isDigit) v = pure "Int"
+      | (take 1 v) == "\"" = pure "String"
+      | (take 1 v) == "'" = pure "Char"
+      | v == "True" || v == "False" = pure "Bool"
+      | (count '.' v) == 1 = pure "Float"
+      | otherwise = fail $ printf "Failed to infer the type of %s" v
+
+    count :: Char -> String -> Int
+    count _ [] = 0
+    count y (x : xs) = if y == x then 1 + (count y xs) else count y xs
 
 parseSExpr :: Parser SExpr
 parseSExpr = undefined

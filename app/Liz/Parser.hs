@@ -25,30 +25,38 @@ data Type = Int'
   | Bool'
   deriving (Show, Eq)
 
-data BinOp = Plus
-  | Minus
+data BinaryOp = Add
+  | Subtract
   | Mulitply
   | Divide
+  | Greater
+  | Less 
+  | Equal 
+  | NotEql
+  | GreaterEql
+  | LessEql
   deriving (Show, Eq)
 
-data UnOp = Negate 
+data UnaryOp = Negate 
   | Not
   deriving (Show, Eq)
 
-data SExpr = SELiteral T.Text
+data SExpr = SEIdentifier T.Text
+  | SELiteral T.Text
   -- | SEFunc Func
   | SEType Type
   | SEVar T.Text SExpr SExpr -- ident - type - value
   | SEConst T.Text SExpr SExpr
-  | SEBinary BinOp SExpr SExpr
-  | SEUnary UnOp SExpr
+  | SESet T.Text SExpr -- ident - value
+  | SEBinary BinaryOp SExpr SExpr
+  | SEUnary UnaryOp SExpr
   deriving (Show, Eq)
 
 lizTypes :: [T.Text]
 lizTypes = ["Int", "Float", "String", "Char", "Bool"]
 
 lizReserved :: [T.Text]
-lizReserved = ["var", "set", "const", "if", "func", "False", "True", "undefined"]
+lizReserved = ["var", "set", "const", "if", "func", "False", "True", "undefined", "not", "negate"]
 
 fromLiteral :: T.Text -> Parser SExpr
 fromLiteral t = case t of
@@ -59,9 +67,32 @@ fromLiteral t = case t of
   "Bool"    -> pure $ SEType Bool'
   _ -> fail "Reached unreachable in 'fromLiteral'."
 
+-- small helper parsing functions
 parseFromList :: [T.Text] -> Parser T.Text
 parseFromList = foldr1 (<|>) . map (string)
 
+parseBinaryOp :: Parser T.Text 
+parseBinaryOp = string "+" <|> 
+  string "-" <|> 
+  string "*" <|> 
+  string "/" <|> 
+  string ">=" <|> 
+  string "<=" <|> 
+  string "==" <|> 
+  string "!=" <|>
+  string ">" <|> 
+  string "<"
+
+parseUnaryOp :: Parser T.Text
+parseUnaryOp = string "not" <|> string "negate"
+
+parseValue :: Parser T.Text
+parseValue = parseStr <|> parseChar <|> parseNum <|> parseBool
+
+parseNested :: Parser SExpr
+parseNested = parseSExpr  <|> (parseValue >>= \v -> pure $ SELiteral v) <|> (parseIdent >>= \i -> pure $ SEIdentifier i)
+
+-- main parsing functions
 parseIdent :: Parser T.Text
 parseIdent = do
   i <- (:) <$> letterChar <*> (some $ alphaNumChar <|> char '-' <|> char '_')
@@ -97,9 +128,6 @@ parseBool = do
   b <- takeWhile1P (Just "letter") isLetter
   pure b
 
-parseValue :: Parser T.Text
-parseValue = parseStr <|> parseChar <|> parseNum <|> parseBool
-
 -- (var *ident* *type* *value*)
 -- (var hello String "World")
 -- (var four 4) ; inferred Int
@@ -112,23 +140,20 @@ parseVarDecl = do
   then fail $ printf "Expected identifier, found keyword '%s'" ident
   else do
     _ <- char ' ' 
-    ty <- try $ (parseFromList lizTypes) <|> parseValue
+    ty <- try $ (parseFromList lizTypes) <|> (lookAhead parseValue)
     aux k ident ty
   where
     aux decl identifier typeOrVal
       | typeOrVal `elem` lizTypes = do
         _ <- char ' '
-        value <- parseValue
+        value <- parseNested
         ty <- fromLiteral typeOrVal
-        pure $ (pickDecl' decl) identifier ty (SELiteral value)
+        pure $ (pickDecl decl) identifier ty value
       | otherwise = do
         (inferType $ T.unpack typeOrVal) >>= \ty -> do 
+          value <- parseNested
           t <- fromLiteral ty
-          pure $ (pickDecl' decl) identifier t (SELiteral typeOrVal)
-
-    pickDecl' decl
-      | decl == "var" = SEVar
-      | decl == "const" = SEConst
+          pure $ (pickDecl decl) identifier t value
 
     inferType :: String -> Parser T.Text
     inferType v
@@ -139,12 +164,61 @@ parseVarDecl = do
       | (count '.' v) == 1 = pure "Float"
       | otherwise = fail $ printf "Failed to infer the type of %s" v
 
+    pickDecl decl
+      | decl == "var" = SEVar
+      | decl == "const" = SEConst
+
     count :: Char -> String -> Int
     count _ [] = 0
     count y (x : xs) = if y == x then 1 + (count y xs) else count y xs
 
+parseSetStmt :: Parser SExpr
+parseSetStmt = do
+  _ <- string "set"
+  _ <- char ' '
+  ident <- parseIdent
+  _ <- char ' '
+  value <- parseNested
+  pure $ SESet ident value
+
+parseUnary :: Parser SExpr
+parseUnary = do
+  op <- parseUnaryOp
+  let op' = pickUnaryOp $ T.unpack op
+  _ <- char ' '
+  v <- parseNested
+  pure $ SEUnary op' v
+  where
+    pickUnaryOp :: String -> UnaryOp
+    pickUnaryOp c 
+      | c == "not" = Not
+      | c == "negate" = Negate
+
+parseBinary :: Parser SExpr
+parseBinary = do
+  op <- parseBinaryOp
+  let op' = pickBinaryOp $ T.unpack op
+  _ <- char ' '
+  left <- parseNested
+  _ <- char ' '
+  right <- parseNested
+  pure $ SEBinary op' left right
+  where
+    pickBinaryOp :: String -> BinaryOp
+    pickBinaryOp c 
+      | c == "+" = Add
+      | c == "-" = Subtract
+      | c == "*" = Mulitply
+      | c == "/" = Divide
+      | c == ">=" = GreaterEql
+      | c == "<=" = LessEql
+      | c == "==" = Equal
+      | c == "!=" = NotEql
+      | c == ">" = Greater
+      | c == "<" = Less
+
 parseSExpr :: Parser SExpr
-parseSExpr = undefined
+parseSExpr = between (char '(') (char ')') $ parseBinary <|> parseUnary <|> parseVarDecl <|> parseSetStmt
 
 someFunc :: IO ()
 someFunc = putStrLn "this is someFunc from Liz/Parser.hs"

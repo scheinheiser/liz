@@ -23,6 +23,7 @@ data Type = Int'
   | String'
   | Char'
   | Bool'
+  | Unit'
   deriving (Show, Eq)
 
 data BinaryOp = Add
@@ -53,7 +54,7 @@ data SExpr = SEIdentifier T.Text
   deriving (Show, Eq)
 
 lizTypes :: [T.Text]
-lizTypes = ["Int", "Float", "String", "Char", "Bool"]
+lizTypes = ["Int", "Float", "String", "Char", "Bool", "Unit"]
 
 lizReserved :: [T.Text]
 lizReserved = ["var", "set", "const", "if", "func", "False", "True", "undefined", "not", "negate"]
@@ -65,9 +66,10 @@ fromLiteral t = case t of
   "String"  -> pure $ SEType String'
   "Char"    -> pure $ SEType Char'
   "Bool"    -> pure $ SEType Bool'
+  "Unit"      -> pure $ SEType Unit'
   _ -> fail "Reached unreachable in 'fromLiteral'."
 
--- small helper parsing functions
+-- helper parsing functions
 parseFromList :: [T.Text] -> Parser T.Text
 parseFromList = foldr1 (<|>) . map (string)
 
@@ -144,6 +146,10 @@ parseVarDecl = do
     aux k ident ty
   where
     aux decl identifier typeOrVal
+      | typeOrVal == "Unit" = do
+        _ <- char ' '
+        u <- string "()"
+        pure $ (pickDecl decl) identifier (SEType Unit') (SELiteral u)
       | typeOrVal `elem` lizTypes = do
         _ <- char ' '
         value <- parseNested

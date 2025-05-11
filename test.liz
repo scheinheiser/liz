@@ -1,21 +1,25 @@
 ; Liz
 ; This is a comment.
 
-; (var *ident* *optional type* *value*)
-(var four 4) ; inferred Int
-(var hello String "World")
+(func main [] > Unit
+  ; (var *ident* *optional type* *value*)
+  (var four 4) ; inferred Int
+  (var hello String "World")
 
-(var no-value Bool undefined) ; this is treated like 'nil' in other languages.
-(var forty Int undefined)
+  (var no-value Bool undefined) ; this is treated like 'nil' in other languages.
+  (var forty Int undefined)
 
-; (set *declared variable* *new value*)
-; It must have the same type of the previous value.
-(set no-value False)
-(set forty (* four 10))
+  ; (set *declared variable* *new value*)
+  ; It must have the same type of the previous value.
+  (set no-value False)
+  (set forty (* four 10))
 
-; (const *ident* *optional type* value)
-(const pi 3.141592) ; inferred type
-(const tau Float 6.283185) ; explicit typing
+  ; (const *ident* *optional type* value)
+  (const pi 3.141592) ; inferred type
+  (const tau Float 6.283185) ; explicit typing
+
+  (print (== 4 (decrement (increment 4)))) ; would print "True"
+  (return ()))
 
 ; (func *ident* *args* *return type* *body*)
 (func increment [number ~ Int] > Int
@@ -27,14 +31,14 @@
 (func flip [b ~ Bool] > Bool 
   (not b))
 
-(func say_hi [name ~ String] > String
+(func say_hi [name ~ String] > Unit
   (const with_hello (++ "hello " name))
-  (return with_hello)) ; you can have an explicit return for variables.
+  (print with_hello)
+  (return ()) ; you can have an explicit return for variables.
 
 (func concat [s1 ~ String, s2 ~ String] > String
   (++ s1 s2))
 
-(func do_nothing [] > ()
+(func do_nothing [] > Unit
   (return ())
 
-(print (== 4 (decrement (increment 4)))) ; would print "True"

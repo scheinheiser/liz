@@ -5,6 +5,7 @@ module Liz.Parser where
 
 import Data.String ( IsString (..))
 import Data.Char (isAlphaNum, isDigit, isLetter)
+import Control.Applicative (liftA3)
 
 import qualified Data.Text as T
 import Text.Printf (printf)
@@ -15,6 +16,7 @@ import Text.Megaparsec.Char
 
 import Data.Void (Void)
 
+-- TODO: Make custom parser errors.
 default IsString (T.Text)
 type Parser = Parsec Void T.Text
 
@@ -44,6 +46,7 @@ data UnaryOp = Negate
 
 data SExpr = SEIdentifier T.Text
   | SELiteral T.Text
+  | SEReturn SExpr
   -- | SEFunc Func
   | SEType Type
   | SEVar T.Text SExpr SExpr -- ident - type - value
@@ -57,7 +60,7 @@ lizTypes :: [T.Text]
 lizTypes = ["Int", "Float", "String", "Char", "Bool", "Unit"]
 
 lizReserved :: [T.Text]
-lizReserved = ["var", "set", "const", "if", "func", "False", "True", "undefined", "not", "negate"]
+lizReserved = ["var", "set", "const", "if", "func", "return", "False", "True", "undefined", "not", "negate"]
 
 fromLiteral :: T.Text -> Parser SExpr
 fromLiteral t = case t of
@@ -67,7 +70,7 @@ fromLiteral t = case t of
   "Char"    -> pure $ SEType Char'
   "Bool"    -> pure $ SEType Bool'
   "Unit"      -> pure $ SEType Unit'
-  _ -> fail "Reached unreachable in 'fromLiteral'."
+  _ -> fail $ printf "Invalid type '%s'" t
 
 -- helper parsing functions
 parseFromList :: [T.Text] -> Parser T.Text
@@ -89,21 +92,28 @@ parseUnaryOp :: Parser T.Text
 parseUnaryOp = string "not" <|> string "negate"
 
 parseValue :: Parser T.Text
-parseValue = parseStr <|> parseChar <|> parseNum <|> parseBool
+parseValue = parseStr <|> parseChar <|> parseNum <|> parseBool <|> parseUnit
 
 parseNested :: Parser SExpr
-parseNested = parseSExpr  <|> (parseValue >>= \v -> pure $ SELiteral v) <|> (parseIdent >>= \i -> pure $ SEIdentifier i)
+parseNested = (parseValue >>= \v -> pure $ SELiteral v) <|> (parseIdent >>= \i -> pure $ SEIdentifier i) <|> parseSExpr
 
 -- main parsing functions
 parseIdent :: Parser T.Text
 parseIdent = do
-  i <- (:) <$> letterChar <*> (some $ alphaNumChar <|> char '-' <|> char '_')
-  pure $ T.pack i
+  s <- letterChar
+  r <- takeWhileP (Just "alphanumeric character, '-' or '_'") valid
+  pure $ T.pack [s] <> r
+  where
+    valid :: Char -> Bool 
+    valid = liftA3 (\x y z -> x || y || z) isLetter ((==) '_') ((==) '-')
+
+parseUnit :: Parser T.Text
+parseUnit = string "()"
 
 parseStr :: Parser T.Text
 parseStr = do
   d1 <- char '"'
-  str <- takeWhile1P (Just "alpha numeric character.") valid 
+  str <- takeWhile1P (Just "alphanumeric character.") valid 
   d2 <- char '"'
   pure $ (d1 T.:< str) T.:> d2
   where
@@ -119,7 +129,7 @@ parseChar = do
 
 parseNum :: Parser T.Text
 parseNum = do
-  n <- takeWhile1P (Just "digits 0-9 or '.'.") valid
+  n <- (takeWhile1P (Just "digits 0-9 or '.'") valid) <* notFollowedBy letterChar
   pure n
   where
     valid :: Char -> Bool
@@ -127,31 +137,29 @@ parseNum = do
 
 parseBool :: Parser T.Text
 parseBool = do
-  b <- takeWhile1P (Just "letter") isLetter
+  b <- (takeWhile1P (Just "letter") isLetter) <* notFollowedBy digitChar
   pure b
 
--- (var *ident* *type* *value*)
--- (var hello String "World")
--- (var four 4) ; inferred Int
+{-
+  (var *ident* *type* *value*)
+  (var hello String "World")
+  (var four 4) ; inferred Int 
+-}
 parseVarDecl :: Parser SExpr
 parseVarDecl = do
   k <- string "var" <|> string "const"
-  _ <- char ' ' 
+  hspace1
   ident <- parseIdent
   if ident `elem` lizReserved
   then fail $ printf "Expected identifier, found keyword '%s'" ident
   else do
-    _ <- char ' ' 
+    hspace1 
     ty <- try $ (parseFromList lizTypes) <|> (lookAhead parseValue)
     aux k ident ty
   where
     aux decl identifier typeOrVal
-      | typeOrVal == "Unit" = do
-        _ <- char ' '
-        u <- string "()"
-        pure $ (pickDecl decl) identifier (SEType Unit') (SELiteral u)
       | typeOrVal `elem` lizTypes = do
-        _ <- char ' '
+        hspace1
         value <- parseNested
         ty <- fromLiteral typeOrVal
         pure $ (pickDecl decl) identifier ty value
@@ -163,11 +171,15 @@ parseVarDecl = do
 
     inferType :: String -> Parser T.Text
     inferType v
+      | (count '.' v) == 1 =
+        if (and . map isDigit) $ filter ((/=) '.') v
+        then pure "Float" 
+        else fail $ printf "Failed to infer the type of %s" v
       | (and . map isDigit) v = pure "Int"
-      | (take 1 v) == "\"" = pure "String"
-      | (take 1 v) == "'" = pure "Char"
+      | (take 1 v) == "'" && (drop (length v - 1) v) == "'" = pure "Char"
+      | (take 1 v) == "\"" && (drop (length v - 1) v) == "\"" = pure "String"
       | v == "True" || v == "False" = pure "Bool"
-      | (count '.' v) == 1 = pure "Float"
+      | v == "()" = pure "Unit"
       | otherwise = fail $ printf "Failed to infer the type of %s" v
 
     pickDecl decl
@@ -181,17 +193,20 @@ parseVarDecl = do
 parseSetStmt :: Parser SExpr
 parseSetStmt = do
   _ <- string "set"
-  _ <- char ' '
+  hspace1
   ident <- parseIdent
-  _ <- char ' '
-  value <- parseNested
-  pure $ SESet ident value
+  if ident `elem` lizReserved
+  then fail $ printf "Expected identifier, found keyword '%s'" ident
+  else do
+    hspace1
+    value <- parseNested
+    pure $ SESet ident value
 
 parseUnary :: Parser SExpr
 parseUnary = do
   op <- parseUnaryOp
   let op' = pickUnaryOp $ T.unpack op
-  _ <- char ' '
+  hspace1
   v <- parseNested
   pure $ SEUnary op' v
   where
@@ -204,9 +219,9 @@ parseBinary :: Parser SExpr
 parseBinary = do
   op <- parseBinaryOp
   let op' = pickBinaryOp $ T.unpack op
-  _ <- char ' '
+  hspace1
   left <- parseNested
-  _ <- char ' '
+  hspace1
   right <- parseNested
   pure $ SEBinary op' left right
   where

@@ -62,4 +62,4 @@ main = hspec $ do
         parse P.parseSExpr "" "(var flipped Bool (not True))" `shouldParse` (P.SEVar "flipped" (P.SEType P.Bool') (P.SEUnary P.Not (P.SELiteral "True")))
 
       it "parse a nested variable declaration and infer its type" $ do
-        parse P.parseSExpr "" "(var hello_world (+ \"hello \" \"world\"))" `shouldParse` (P.SEVar "hello_world" (P.SEType P.String') (P.SEBinary P.Add (P.SELiteral "\"hello\"") (P.SELiteral "\"world\"")))
+        parse P.parseSExpr "" "(var hello_world (+ 5 6))" `shouldParse` (P.SEVar "hello_world" (P.SEType P.Int') (P.SEBinary P.Add (P.SELiteral "5") (P.SELiteral "6")))

@@ -30,7 +30,7 @@ data Type = Int'
 
 data BinaryOp = Add
   | Subtract
-  | Mulitply
+  | Multiply
   | Divide
   | Greater
   | Less 
@@ -82,6 +82,9 @@ invalidType = customFailure . E.InvalidType
 reservedIdent :: T.Text -> Parser a
 reservedIdent = customFailure . E.ReservedIdent
 
+unsupportedDeclaration :: T.Text -> Parser a
+unsupportedDeclaration = customFailure . E.UnsupportedDeclaration
+
 -- helper parsing functions
 parseFromList :: [T.Text] -> Parser T.Text
 parseFromList = foldr1 (<|>) . map (string)
@@ -109,10 +112,7 @@ parseValue :: Parser T.Text
 parseValue = choice [parseStr, parseChar, parseNum, parseBool, parseUnit]
 
 parseNested :: Parser SExpr
-parseNested = (parseValue >>= \v -> pure $ SELiteral v) <|> (parseIdent >>= \i -> pure $ SEIdentifier i) <|> parseSExpr
-
-parseNested' :: Parser SExpr
-parseNested' = (SELiteral <$> parseValue) <|> (SEIdentifier <$> parseIdent) <|> parseSExpr
+parseNested = (SELiteral <$> parseValue) <|> (SEIdentifier <$> parseIdent) <|> parseSExpr
 
 -- main parsing functions
 parseIdent :: Parser T.Text
@@ -171,20 +171,40 @@ parseVarDecl = do
   then reservedIdent ident
   else do
     hspace1 
-    ty <- try $ (parseFromList lizTypes) <|> parseValue
-    aux k ident ty
+    ty <- try $ (fromLiteral <$> parseFromList lizTypes) <|> pure parseNested
+    ty >>= \t -> aux k ident t
   where
-    aux decl identifier typeOrVal
-      | typeOrVal `elem` lizTypes = do
-        hspace1
-        value <- parseNested
-        ty <- fromLiteral typeOrVal
-        pure $ (pickDecl decl) identifier ty value
-      | otherwise = do
-        (inferType $ T.unpack typeOrVal) >>= \ty -> do 
-          value <- parseNested
-          t <- fromLiteral ty
-          pure $ (pickDecl decl) identifier t value
+    aux :: T.Text -> T.Text -> SExpr -> Parser SExpr
+    aux decl iden (SEType ty) = do
+      hspace1
+      value <- parseNested
+      pure $ (pickDecl decl) iden (SEType ty) value
+    aux decl iden (SEBinary op l r) = do
+      ty <- fromBinaryOp op
+      pure $ (pickDecl decl) iden ty (SEBinary op l r)
+    aux decl iden (SEUnary op val) = do
+      ty <- fromUnaryOp op
+      pure $ (pickDecl decl) iden ty (SEUnary op val)
+    aux decl iden (SELiteral lit) = do
+      ty <- (inferType $ T.unpack lit) >>= \v -> fromLiteral v
+      pure $ (pickDecl decl) iden ty (SELiteral lit)
+    aux _ _ op = unsupportedDeclaration $ T.show op
+
+    fromBinaryOp :: BinaryOp -> Parser SExpr
+    fromBinaryOp op
+      | op `elem` numeric = fromLiteral "Int"
+      | op `elem` boolean = fromLiteral "Bool"
+
+    fromUnaryOp :: UnaryOp -> Parser SExpr
+    fromUnaryOp op 
+      | op == Negate = fromLiteral "Int"
+      | op == Not = fromLiteral "Bool"
+
+    numeric :: [BinaryOp]
+    numeric = [Add, Subtract, Multiply, Divide]
+
+    boolean :: [BinaryOp]
+    boolean = [Greater, Less, Equal, NotEql, GreaterEql, LessEql]
 
     inferType :: String -> Parser T.Text
     inferType v
@@ -246,7 +266,7 @@ parseBinary = do
     pickBinaryOp c 
       | c == "+" = Add
       | c == "-" = Subtract
-      | c == "*" = Mulitply
+      | c == "*" = Multiply
       | c == "/" = Divide
       | c == ">=" = GreaterEql
       | c == "<=" = LessEql

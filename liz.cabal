@@ -19,7 +19,7 @@ common warnings
 executable liz
     import:           warnings
     main-is:          Main.hs
-    other-modules:    Liz.Parser
+    other-modules:    Liz.Parser, Liz.Error
     other-extensions: OverloadedStrings, NamedDefaults
     build-depends:    base ^>=4.21.0.0, megaparsec >= 9.6.0, text >= 2.1
     hs-source-dirs:   app
@@ -28,7 +28,7 @@ executable liz
 test-suite liz-test
     import:           warnings
     default-language: GHC2024
-    other-modules: Liz.Parser
+    other-modules: Liz.Parser, Liz.Error
     other-extensions: OverloadedStrings, NamedDefaults
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test, app

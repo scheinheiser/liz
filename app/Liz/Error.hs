@@ -13,6 +13,7 @@ import Text.Megaparsec
 data PError = FailedTypeInference T.Text
   | InvalidType T.Text
   | ReservedIdent T.Text
+  | UnsupportedDeclaration T.Text
   deriving (Show, Eq, Ord)
 
 instance ShowErrorComponent PError where
@@ -20,3 +21,4 @@ instance ShowErrorComponent PError where
     FailedTypeInference s -> printf "[ERROR] Failed to infer type of '%s'" (T.unpack s)
     InvalidType s -> printf "[ERROR] Invalid type '%s'" (T.unpack s)
     ReservedIdent s -> printf "[ERROR] Expected identifier, found keyword '%s'" (T.unpack s)
+    UnsupportedDeclaration s -> printf "[ERROR] This type of declaration is currently not supported - '%s'" (T.unpack s)

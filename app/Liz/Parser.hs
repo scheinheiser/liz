@@ -3,6 +3,7 @@
 
 module Liz.Parser where
 
+import qualified Liz.Error as E
 import Data.String ( IsString (..))
 import Data.Char (isAlphaNum, isDigit, isLetter)
 import Control.Applicative (liftA3)
@@ -16,9 +17,8 @@ import Text.Megaparsec.Char
 
 import Data.Void (Void)
 
--- TODO: Make custom parser errors.
 default IsString (T.Text)
-type Parser = Parsec Void T.Text
+type Parser = Parsec E.PError T.Text
 
 data Type = Int'
   | Float'
@@ -70,7 +70,17 @@ fromLiteral t = case t of
   "Char"    -> pure $ SEType Char'
   "Bool"    -> pure $ SEType Bool'
   "Unit"      -> pure $ SEType Unit'
-  _ -> fail $ printf "Invalid type '%s'" t
+  _ -> invalidType t
+
+-- helper error functions
+failedTypeInference :: T.Text -> Parser a
+failedTypeInference = customFailure . E.FailedTypeInference
+
+invalidType :: T.Text -> Parser a
+invalidType = customFailure . E.InvalidType
+
+reservedIdent :: T.Text -> Parser a
+reservedIdent = customFailure . E.ReservedIdent
 
 -- helper parsing functions
 parseFromList :: [T.Text] -> Parser T.Text
@@ -88,14 +98,21 @@ parseBinaryOp = string "+" <|>
   string ">" <|> 
   string "<"
 
+parseBinaryOp' :: Parser T.Text
+parseBinaryOp' = 
+  choice [string "+", string "-", string "*", string "/", string ">=", string "<=", string "==", string "!=", string ">", string "<"]
+
 parseUnaryOp :: Parser T.Text
 parseUnaryOp = string "not" <|> string "negate"
 
 parseValue :: Parser T.Text
-parseValue = parseStr <|> parseChar <|> parseNum <|> parseBool <|> parseUnit
+parseValue = choice [parseStr, parseChar, parseNum, parseBool, parseUnit]
 
 parseNested :: Parser SExpr
 parseNested = (parseValue >>= \v -> pure $ SELiteral v) <|> (parseIdent >>= \i -> pure $ SEIdentifier i) <|> parseSExpr
+
+parseNested' :: Parser SExpr
+parseNested' = (SELiteral <$> parseValue) <|> (SEIdentifier <$> parseIdent) <|> parseSExpr
 
 -- main parsing functions
 parseIdent :: Parser T.Text
@@ -105,7 +122,7 @@ parseIdent = do
   pure $ T.pack [s] <> r
   where
     valid :: Char -> Bool 
-    valid = liftA3 (\x y z -> x || y || z) isLetter ((==) '_') ((==) '-')
+    valid = liftA3 (\x y z -> x || y || z) isAlphaNum ((==) '_') ((==) '-')
 
 parseUnit :: Parser T.Text
 parseUnit = string "()"
@@ -151,10 +168,10 @@ parseVarDecl = do
   hspace1
   ident <- parseIdent
   if ident `elem` lizReserved
-  then fail $ printf "Expected identifier, found keyword '%s'" ident
+  then reservedIdent ident
   else do
     hspace1 
-    ty <- try $ (parseFromList lizTypes) <|> (lookAhead parseValue)
+    ty <- try $ (parseFromList lizTypes) <|> parseValue
     aux k ident ty
   where
     aux decl identifier typeOrVal
@@ -174,13 +191,13 @@ parseVarDecl = do
       | (count '.' v) == 1 =
         if (and . map isDigit) $ filter ((/=) '.') v
         then pure "Float" 
-        else fail $ printf "Failed to infer the type of %s" v
+        else failedTypeInference $ T.pack v
       | (and . map isDigit) v = pure "Int"
       | (take 1 v) == "'" && (drop (length v - 1) v) == "'" = pure "Char"
       | (take 1 v) == "\"" && (drop (length v - 1) v) == "\"" = pure "String"
       | v == "True" || v == "False" = pure "Bool"
       | v == "()" = pure "Unit"
-      | otherwise = fail $ printf "Failed to infer the type of %s" v
+      | otherwise = failedTypeInference $ T.pack v
 
     pickDecl decl
       | decl == "var" = SEVar
@@ -196,7 +213,7 @@ parseSetStmt = do
   hspace1
   ident <- parseIdent
   if ident `elem` lizReserved
-  then fail $ printf "Expected identifier, found keyword '%s'" ident
+  then reservedIdent ident
   else do
     hspace1
     value <- parseNested
@@ -239,7 +256,7 @@ parseBinary = do
       | c == "<" = Less
 
 parseSExpr :: Parser SExpr
-parseSExpr = between (char '(') (char ')') $ parseBinary <|> parseUnary <|> parseVarDecl <|> parseSetStmt
+parseSExpr = between (char '(') (char ')') $ choice [parseBinary, parseUnary, parseVarDecl, parseSetStmt]
 
 someFunc :: IO ()
 someFunc = putStrLn "this is someFunc from Liz/Parser.hs"

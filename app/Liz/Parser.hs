@@ -181,7 +181,7 @@ parseVarDecl = do
     aux decl iden expr@(SEBinary op _ _)  = (fromBinaryOp op) >>= \ty -> pure $ (pickDecl decl) iden ty expr
     aux decl iden expr@(SEUnary op _)     = (fromUnaryOp op) >>= \ty -> pure $ (pickDecl decl) iden ty expr
     aux decl iden lit@(SELiteral literal) = do
-      ty <- join $ fromLiteral <$> (inferType $ T.unpack literal)
+      ty <- join $ fromLiteral <$> inferType literal
       pure $ (pickDecl decl) iden ty lit
     aux _ _ op = unsupportedDeclaration $ T.show op
 
@@ -204,22 +204,25 @@ parseVarDecl = do
       | decl == "var" = SEVar
       | decl == "const" = SEConst
 
-    --TODO: change to work with T.Text
-    inferType :: String -> Parser T.Text
+    inferType :: T.Text -> Parser T.Text
     inferType v
       | (count '.' v) == 1 =
-        if (and . map isDigit) $ filter ((/=) '.') v
+        -- remove the dot to check if the rest are nums.
+        if T.foldl' isDigitText True $ T.filter ((/=) '.') v
         then pure "Float" 
-        else failedTypeInference $ T.pack v
-      | (and . map isDigit) v = pure "Int"
-      | (take 1 v) == "'" && (drop (length v - 1) v) == "'" = pure "Char"
-      | (take 1 v) == "\"" && (drop (length v - 1) v) == "\"" = pure "String"
+        else failedTypeInference v
+      | T.foldl' isDigitText True v = pure "Int"
+      | (T.take 1 v) == "'" && (T.last v) == '\'' = pure "Char"
+      | (T.take 1 v) == "\"" && (T.last v) == '"' = pure "String"
       | v == "True" || v == "False" = pure "Bool"
       | v == "()" = pure "Unit"
-      | otherwise = failedTypeInference $ T.pack v
+      | otherwise = failedTypeInference v
+        where
+          isDigitText :: Bool -> Char -> Bool
+          isDigitText = \acc c -> if isDigit c then (True || acc) else (False || acc)
 
-    count :: Char -> String -> Int
-    count t = (length . filter (t ==))
+    count :: Char -> T.Text -> Int
+    count t = (T.length . T.filter (t ==))
 
 parseSetStmt :: Parser SExpr
 parseSetStmt = do

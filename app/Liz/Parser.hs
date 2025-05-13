@@ -4,18 +4,17 @@
 module Liz.Parser where
 
 import qualified Liz.Error as E
+import qualified Data.Text as T
+
 import Data.String ( IsString (..))
 import Data.Char (isAlphaNum, isDigit, isLetter)
 import Control.Applicative (liftA3)
-
-import qualified Data.Text as T
-import Text.Printf (printf)
+import Control.Monad (join)
+-- import Data.Void (Void)
 
 import Text.Megaparsec hiding (count)
 import Text.Megaparsec.Char
 -- import qualified Text.Megaparsec.Char.Lexer as L
-
-import Data.Void (Void)
 
 default IsString (T.Text)
 type Parser = Parsec E.PError T.Text
@@ -171,41 +170,39 @@ parseVarDecl = do
   then reservedIdent ident
   else do
     hspace1 
-    ty <- try $ (fromLiteral <$> parseFromList lizTypes) <|> pure parseNested
-    ty >>= \t -> aux k ident t
+    ty <- (join $ fromLiteral <$> parseFromList lizTypes) <|> parseNested
+    aux k ident ty
   where
     aux :: T.Text -> T.Text -> SExpr -> Parser SExpr
-    aux decl iden (SEType ty) = do
+    aux decl iden ty@(SEType _) = do
       hspace1
       value <- parseNested
-      pure $ (pickDecl decl) iden (SEType ty) value
-    aux decl iden (SEBinary op l r) = do
-      ty <- fromBinaryOp op
-      pure $ (pickDecl decl) iden ty (SEBinary op l r)
-    aux decl iden (SEUnary op val) = do
-      ty <- fromUnaryOp op
-      pure $ (pickDecl decl) iden ty (SEUnary op val)
-    aux decl iden (SELiteral lit) = do
-      ty <- (inferType $ T.unpack lit) >>= \v -> fromLiteral v
-      pure $ (pickDecl decl) iden ty (SELiteral lit)
+      pure $ (pickDecl decl) iden ty value
+    aux decl iden expr@(SEBinary op _ _)  = (fromBinaryOp op) >>= \ty -> pure $ (pickDecl decl) iden ty expr
+    aux decl iden expr@(SEUnary op _)     = (fromUnaryOp op) >>= \ty -> pure $ (pickDecl decl) iden ty expr
+    aux decl iden lit@(SELiteral literal) = do
+      ty <- join $ fromLiteral <$> (inferType $ T.unpack literal)
+      pure $ (pickDecl decl) iden ty lit
     aux _ _ op = unsupportedDeclaration $ T.show op
 
     fromBinaryOp :: BinaryOp -> Parser SExpr
     fromBinaryOp op
       | op `elem` numeric = fromLiteral "Int"
       | op `elem` boolean = fromLiteral "Bool"
+      where
+        numeric = [Add, Subtract, Multiply, Divide]
+        boolean = [Greater, Less, Equal, NotEql, GreaterEql, LessEql]
 
     fromUnaryOp :: UnaryOp -> Parser SExpr
     fromUnaryOp op 
       | op == Negate = fromLiteral "Int"
       | op == Not = fromLiteral "Bool"
 
-    numeric :: [BinaryOp]
-    numeric = [Add, Subtract, Multiply, Divide]
+    pickDecl decl
+      | decl == "var" = SEVar
+      | decl == "const" = SEConst
 
-    boolean :: [BinaryOp]
-    boolean = [Greater, Less, Equal, NotEql, GreaterEql, LessEql]
-
+    --TODO: change to work with T.Text
     inferType :: String -> Parser T.Text
     inferType v
       | (count '.' v) == 1 =
@@ -219,13 +216,8 @@ parseVarDecl = do
       | v == "()" = pure "Unit"
       | otherwise = failedTypeInference $ T.pack v
 
-    pickDecl decl
-      | decl == "var" = SEVar
-      | decl == "const" = SEConst
-
     count :: Char -> String -> Int
-    count _ [] = 0
-    count y (x : xs) = if y == x then 1 + (count y xs) else count y xs
+    count t = (length . filter (t ==))
 
 parseSetStmt :: Parser SExpr
 parseSetStmt = do

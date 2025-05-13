@@ -185,6 +185,8 @@ parseVarDecl = do
       pure $ (pickDecl decl) iden ty lit
     aux _ _ op = unsupportedDeclaration $ T.show op
 
+    --TODO: change to allow for floats to access numeric ops 
+    -- It should correctly choose between int or float based on the lit.
     fromBinaryOp :: BinaryOp -> Parser SExpr
     fromBinaryOp op
       | op `elem` numeric = fromLiteral "Int"

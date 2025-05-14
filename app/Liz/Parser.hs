@@ -9,15 +9,17 @@ import qualified Data.Text as T
 import Data.String ( IsString (..))
 import Data.Char (isAlphaNum, isDigit, isLetter)
 import Control.Applicative (liftA3)
-import Control.Monad (join)
 -- import Data.Void (Void)
 
 import Text.Megaparsec hiding (count)
 import Text.Megaparsec.Char
--- import qualified Text.Megaparsec.Char.Lexer as L
+import qualified Text.Megaparsec.Char.Lexer as L
 
 default IsString (T.Text)
 type Parser = Parsec E.PError T.Text
+
+scn :: Parser ()
+scn = L.space space1 (L.skipLineComment ";") empty
 
 data Type = Int'
   | Float'
@@ -43,10 +45,24 @@ data UnaryOp = Negate
   | Not
   deriving (Show, Eq)
 
+data Arg = Arg
+  { argIdent :: T.Text
+  , argType :: Type
+  }
+  deriving (Show, Eq)
+
+data Func = Func 
+  { funcIdent       :: T.Text
+  , funcArgs        :: [Arg]
+  , funcReturnType  :: Type
+  -- , funcBody        :: [SExpr]
+  }
+  deriving (Show, Eq)
+
 data SExpr = SEIdentifier T.Text
   | SELiteral T.Text
   | SEReturn SExpr
-  -- | SEFunc Func
+  | SEFunc Func
   | SEType Type
   | SEVar T.Text SExpr SExpr -- ident - type - value
   | SEConst T.Text SExpr SExpr
@@ -163,26 +179,25 @@ parseBool = do
 -}
 parseVarDecl :: Parser SExpr
 parseVarDecl = do
-  k <- string "var" <|> string "const"
+  decType <- SEVar <$ string "var" <|> SEConst <$ string "const"
   hspace1
   ident <- parseIdent
   if ident `elem` lizReserved
   then reservedIdent ident
   else do
     hspace1 
-    ty <- (join $ fromLiteral <$> parseFromList lizTypes) <|> parseNested
-    aux k ident ty
+    ty <- (parseFromList lizTypes >>= id . fromLiteral) <|> parseNested
+    aux decType ident ty
   where
-    aux :: T.Text -> T.Text -> SExpr -> Parser SExpr
     aux decl iden ty@(SEType _) = do
       hspace1
       value <- parseNested
-      pure $ (pickDecl decl) iden ty value
-    aux decl iden expr@(SEBinary op _ _)  = (fromBinaryOp op) >>= \ty -> pure $ (pickDecl decl) iden ty expr
-    aux decl iden expr@(SEUnary op _)     = (fromUnaryOp op) >>= \ty -> pure $ (pickDecl decl) iden ty expr
+      pure $ decl iden ty value
+    aux decl iden expr@(SEBinary op _ _)  = (fromBinaryOp op) >>= \ty -> pure $ decl iden ty expr
+    aux decl iden expr@(SEUnary op _)     = (fromUnaryOp op) >>= \ty -> pure $ decl iden ty expr
     aux decl iden lit@(SELiteral literal) = do
-      ty <- join $ fromLiteral <$> inferType literal
-      pure $ (pickDecl decl) iden ty lit
+      ty <- inferType literal >>= id . fromLiteral
+      pure $ decl iden ty lit
     aux _ _ op = unsupportedDeclaration $ T.show op
 
     --TODO: change to allow for floats to access numeric ops 
@@ -199,10 +214,6 @@ parseVarDecl = do
     fromUnaryOp op 
       | op == Negate = fromLiteral "Int"
       | op == Not = fromLiteral "Bool"
-
-    pickDecl decl
-      | decl == "var" = SEVar
-      | decl == "const" = SEConst
 
     inferType :: T.Text -> Parser T.Text
     inferType v
@@ -271,6 +282,49 @@ parseBinary = do
       | c == "!=" = NotEql
       | c == ">" = Greater
       | c == "<" = Less
+
+{-
+data Arg = Arg
+  { argIdent :: T.Text
+  , argType :: Type
+  }
+
+data Func = Func 
+  { funcIdent ``    :: T.Text
+  , funcArgs        :: [Arg]
+  , funcReturnType  :: Type
+  , funcBody        :: [SExpr]
+  }
+
+  (func *ident* *args* *return type* *body*)
+  (func increment [number ~ Int] > Int
+    (+ number 1)) ; the last executed sexpr's value is returned.
+-}
+parseFuncDecl :: Parser SExpr
+parseFuncDecl = do
+  p <- L.indentLevel >>= L.indentGuard scn GT
+  _ <- string "func"
+  hspace1
+  ident <- parseIdent
+  hspace1
+  args <- parseArgs
+  hspace1
+  _ <- char '>'
+  hspace1
+  retTy <- parseFromList lizTypes >>= id . fromLiteral
+  pure $ SEFunc $ Func {funcIdent = ident, funcArgs = args, funcReturnType = getType retTy}
+  where
+    parseArgs :: Parser [Arg]
+    parseArgs = between (char '[') (char ']') $ many $ do
+      ident <- parseIdent
+      hspace1
+      _ <- char '~'
+      hspace1
+      ty <- parseFromList lizTypes >>= id . fromLiteral
+      pure $ Arg {argIdent = ident, argType = getType ty}
+
+    getType :: SExpr -> Type
+    getType (SEType x) = x
 
 parseSExpr :: Parser SExpr
 parseSExpr = between (char '(') (char ')') $ choice [parseBinary, parseUnary, parseVarDecl, parseSetStmt]

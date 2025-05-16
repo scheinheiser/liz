@@ -8,8 +8,6 @@ import qualified Data.Text as T
 
 import Data.String ( IsString (..))
 import Data.Char (isAlphaNum, isDigit, isLetter)
-import Control.Applicative (liftA3)
--- import Data.Void (Void)
 
 import Text.Megaparsec hiding (count)
 import Text.Megaparsec.Char
@@ -71,28 +69,15 @@ data SExpr = SEIdentifier T.Text
   | SEUnary UnaryOp SExpr
   deriving (Show, Eq)
 
-lizTypes :: [T.Text]
-lizTypes = ["Int", "Float", "String", "Char", "Bool", "Unit"]
-
 lizReserved :: [T.Text]
-lizReserved = ["var", "set", "const", "if", "func", "return", "False", "True", "undefined", "not", "negate"]
-
-fromLiteral :: T.Text -> Parser SExpr
-fromLiteral t = case t of
-  "Int"     -> pure $ SEType Int'
-  "Float"   -> pure $ SEType Float'
-  "String"  -> pure $ SEType String'
-  "Char"    -> pure $ SEType Char'
-  "Bool"    -> pure $ SEType Bool'
-  "Unit"      -> pure $ SEType Unit'
-  _ -> invalidType t
+lizReserved = 
+  ["var", "set", "const", "if", "func", "return", "False",
+   "True", "undefined", "not", "negate", "Int", "Float", 
+   "String", "Char", "Bool"]
 
 -- helper error functions
 failedTypeInference :: T.Text -> Parser a
 failedTypeInference = customFailure . E.FailedTypeInference
-
-invalidType :: T.Text -> Parser a
-invalidType = customFailure . E.InvalidType
 
 reservedIdent :: T.Text -> Parser a
 reservedIdent = customFailure . E.ReservedIdent
@@ -101,27 +86,14 @@ unsupportedDeclaration :: T.Text -> Parser a
 unsupportedDeclaration = customFailure . E.UnsupportedDeclaration
 
 -- helper parsing functions
-parseFromList :: [T.Text] -> Parser T.Text
-parseFromList = foldr1 (<|>) . map (string)
-
-parseBinaryOp :: Parser T.Text 
-parseBinaryOp = string "+" <|> 
-  string "-" <|> 
-  string "*" <|> 
-  string "/" <|> 
-  string ">=" <|> 
-  string "<=" <|> 
-  string "==" <|> 
-  string "!=" <|>
-  string ">" <|> 
-  string "<"
-
-parseBinaryOp' :: Parser T.Text
-parseBinaryOp' = 
-  choice [string "+", string "-", string "*", string "/", string ">=", string "<=", string "==", string "!=", string ">", string "<"]
-
-parseUnaryOp :: Parser T.Text
-parseUnaryOp = string "not" <|> string "negate"
+parseType :: Parser Type
+parseType =
+  Int' <$ string "Int" <|>
+  Float' <$ string "Float" <|>
+  String' <$ string "String" <|>
+  Char' <$ string "Char" <|>
+  Bool' <$ string "Bool" <|>
+  Unit' <$ string "Unit"
 
 parseValue :: Parser T.Text
 parseValue = choice [parseStr, parseChar, parseNum, parseBool, parseUnit]
@@ -133,11 +105,15 @@ parseNested = (SELiteral <$> parseValue) <|> (SEIdentifier <$> parseIdent) <|> p
 parseIdent :: Parser T.Text
 parseIdent = do
   s <- letterChar
-  r <- takeWhileP (Just "alphanumeric character, '-' or '_'") valid
-  pure $ T.pack [s] <> r
+  r <- takeWhileP (Just "alphanumeric character or '_'") valid
+  let ident = T.pack [s] <> r
+
+  if ident `elem` lizReserved
+  then reservedIdent ident
+  else pure $ ident
   where
     valid :: Char -> Bool 
-    valid = liftA3 (\x y z -> x || y || z) isAlphaNum ((==) '_') ((==) '-')
+    valid = liftA2 (||) isAlphaNum ('_' ==)
 
 parseUnit :: Parser T.Text
 parseUnit = string "()"
@@ -150,7 +126,7 @@ parseStr = do
   pure $ (d1 T.:< str) T.:> d2
   where
     valid :: Char -> Bool
-    valid = liftA2 (||) isAlphaNum ((==) ' ')
+    valid = liftA2 (||) isAlphaNum (' ' ==)
 
 parseChar :: Parser T.Text
 parseChar = do
@@ -165,7 +141,7 @@ parseNum = do
   pure n
   where
     valid :: Char -> Bool
-    valid = liftA2 (||) isDigit ((==) '.') 
+    valid = liftA2 (||) isDigit ('.' ==) 
 
 parseBool :: Parser T.Text
 parseBool = do
@@ -182,51 +158,30 @@ parseVarDecl = do
   decType <- SEVar <$ string "var" <|> SEConst <$ string "const"
   hspace1
   ident <- parseIdent
-  if ident `elem` lizReserved
-  then reservedIdent ident
-  else do
-    hspace1 
-    ty <- (parseFromList lizTypes >>= id . fromLiteral) <|> parseNested
-    aux decType ident ty
+  hspace1 
+  ty <- (parseType >>= pure . SEType) <|> parseNested
+  aux decType ident ty
   where
     aux decl iden ty@(SEType _) = do
       hspace1
       value <- parseNested
       pure $ decl iden ty value
-    aux decl iden expr@(SEBinary op _ _)  = (fromBinaryOp op) >>= \ty -> pure $ decl iden ty expr
-    aux decl iden expr@(SEUnary op _)     = (fromUnaryOp op) >>= \ty -> pure $ decl iden ty expr
     aux decl iden lit@(SELiteral literal) = do
-      ty <- inferType literal >>= id . fromLiteral
+      ty <- inferType literal
       pure $ decl iden ty lit
     aux _ _ op = unsupportedDeclaration $ T.show op
 
-    --TODO: change to allow for floats to access numeric ops 
-    -- It should correctly choose between int or float based on the lit.
-    fromBinaryOp :: BinaryOp -> Parser SExpr
-    fromBinaryOp op
-      | op `elem` numeric = fromLiteral "Int"
-      | op `elem` boolean = fromLiteral "Bool"
-      where
-        numeric = [Add, Subtract, Multiply, Divide]
-        boolean = [Greater, Less, Equal, NotEql, GreaterEql, LessEql]
-
-    fromUnaryOp :: UnaryOp -> Parser SExpr
-    fromUnaryOp op 
-      | op == Negate = fromLiteral "Int"
-      | op == Not = fromLiteral "Bool"
-
-    inferType :: T.Text -> Parser T.Text
+    inferType :: T.Text -> Parser SExpr
     inferType v
       | (count '.' v) == 1 =
-        -- remove the dot to check if the rest are nums.
         if T.foldl' isDigitText True $ T.filter ((/=) '.') v
-        then pure "Float" 
+        then pure $ SEType Float'
         else failedTypeInference v
-      | T.foldl' isDigitText True v = pure "Int"
-      | (T.take 1 v) == "'" && (T.last v) == '\'' = pure "Char"
-      | (T.take 1 v) == "\"" && (T.last v) == '"' = pure "String"
-      | v == "True" || v == "False" = pure "Bool"
-      | v == "()" = pure "Unit"
+      | T.foldl' isDigitText True v = pure $ SEType Int'
+      | (T.take 1 v) == "'" && (T.last v) == '\'' = pure $ SEType Char'
+      | (T.take 1 v) == "\"" && (T.last v) == '"' = pure $ SEType String'
+      | v == "True" || v == "False" = pure $ SEType Bool'
+      | v == "()" = pure $ SEType Unit'
       | otherwise = failedTypeInference v
         where
           isDigitText :: Bool -> Char -> Bool
@@ -240,48 +195,38 @@ parseSetStmt = do
   _ <- string "set"
   hspace1
   ident <- parseIdent
-  if ident `elem` lizReserved
-  then reservedIdent ident
-  else do
-    hspace1
-    value <- parseNested
-    pure $ SESet ident value
+  hspace1
+  value <- parseNested
+  pure $ SESet ident value
 
 parseUnary :: Parser SExpr
 parseUnary = do
   op <- parseUnaryOp
-  let op' = pickUnaryOp $ T.unpack op
   hspace1
   v <- parseNested
-  pure $ SEUnary op' v
+  pure $ op v
   where
-    pickUnaryOp :: String -> UnaryOp
-    pickUnaryOp c 
-      | c == "not" = Not
-      | c == "negate" = Negate
+    parseUnaryOp = SEUnary Not <$ string "not" <|> SEUnary Negate <$ string "negate"
 
 parseBinary :: Parser SExpr
 parseBinary = do
   op <- parseBinaryOp
-  let op' = pickBinaryOp $ T.unpack op
   hspace1
   left <- parseNested
   hspace1
   right <- parseNested
-  pure $ SEBinary op' left right
+  pure $ op left right
   where
-    pickBinaryOp :: String -> BinaryOp
-    pickBinaryOp c 
-      | c == "+" = Add
-      | c == "-" = Subtract
-      | c == "*" = Multiply
-      | c == "/" = Divide
-      | c == ">=" = GreaterEql
-      | c == "<=" = LessEql
-      | c == "==" = Equal
-      | c == "!=" = NotEql
-      | c == ">" = Greater
-      | c == "<" = Less
+    parseBinaryOp = SEBinary Add <$ string "+" <|> 
+      SEBinary Subtract <$ string "-" <|> 
+      SEBinary Multiply <$ string "*" <|> 
+      SEBinary Divide <$ string "/" <|> 
+      SEBinary GreaterEql <$ string ">=" <|> 
+      SEBinary LessEql <$ string "<=" <|> 
+      SEBinary Equal <$ string "==" <|> 
+      SEBinary NotEql <$ string "!=" <|>
+      SEBinary Greater <$ string ">" <|> 
+      SEBinary Less <$ string "<"
 
 {-
 data Arg = Arg
@@ -302,32 +247,33 @@ data Func = Func
 -}
 parseFuncDecl :: Parser SExpr
 parseFuncDecl = do
-  p <- L.indentLevel >>= L.indentGuard scn GT
+  -- p <- L.indentLevel >>= L.indentGuard scn GT
   _ <- string "func"
   hspace1
   ident <- parseIdent
   hspace1
-  args <- parseArgs
-  hspace1
+  args <- parseFuncArgs
+  hidden hspace
   _ <- char '>'
-  hspace1
-  retTy <- parseFromList lizTypes >>= id . fromLiteral
-  pure $ SEFunc $ Func {funcIdent = ident, funcArgs = args, funcReturnType = getType retTy}
+  hidden hspace
+  retTy <- parseType
+  pure $ SEFunc Func {funcIdent = ident, funcArgs = args, funcReturnType = retTy}
   where
-    parseArgs :: Parser [Arg]
-    parseArgs = between (char '[') (char ']') $ many $ do
-      ident <- parseIdent
-      hspace1
-      _ <- char '~'
-      hspace1
-      ty <- parseFromList lizTypes >>= id . fromLiteral
-      pure $ Arg {argIdent = ident, argType = getType ty}
-
-    getType :: SExpr -> Type
-    getType (SEType x) = x
+    parseFuncArgs :: Parser [Arg]
+    parseFuncArgs = between (char '[') (char ']') $ aux `sepBy` char ','
+      where
+        aux :: Parser Arg
+        aux = do
+          hidden hspace
+          ident <- parseIdent
+          hidden hspace
+          _ <- char '~'
+          hidden hspace
+          ty <- parseType
+          pure Arg { argIdent = ident, argType = ty}
 
 parseSExpr :: Parser SExpr
-parseSExpr = between (char '(') (char ')') $ choice [parseBinary, parseUnary, parseVarDecl, parseSetStmt]
+parseSExpr = between (char '(') (char ')') $ choice [parseFuncDecl, parseBinary, parseUnary, parseVarDecl, parseSetStmt]
 
 someFunc :: IO ()
 someFunc = putStrLn "this is someFunc from Liz/Parser.hs"

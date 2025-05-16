@@ -4,9 +4,9 @@ module Main (main) where
 import Test.Hspec
 import Test.Hspec.Megaparsec
 
-import qualified Data.Text as T
+-- import qualified Data.Text as T
 import Text.Megaparsec
-import Text.Megaparsec.Char
+-- import Text.Megaparsec.Char
 
 import qualified Liz.Parser as P
 
@@ -61,5 +61,5 @@ main = hspec $ do
       it "parse a nested variable declaration with explicit typing" $ do
         parse P.parseSExpr "" "(var flipped Bool (not True))" `shouldParse` (P.SEVar "flipped" (P.SEType P.Bool') (P.SEUnary P.Not (P.SELiteral "True")))
 
-      it "parse a nested variable declaration and infer its type" $ do
-        parse P.parseSExpr "" "(var hello_world (+ 5 6))" `shouldParse` (P.SEVar "hello_world" (P.SEType P.Int') (P.SEBinary P.Add (P.SELiteral "5") (P.SELiteral "6")))
+      it "parse a nested variable declaration and infer its type (should fail)" $ do
+        parse P.parseSExpr "" `shouldFailOn` "(var hello_world (+ 5 6))" 

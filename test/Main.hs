@@ -23,6 +23,12 @@ main = hspec $ do
     it "parse a float" $ do
       parse P.parseNum "" "999.999" `shouldParse` "999.999"
 
+    it "parse a unit" $ do
+      parse P.parseUnit "" "()" `shouldParse` "()"
+
+    it "parse a bool" $ do
+      parse P.parseBool "" "True" `shouldParse` "True"
+
   describe "Variable declaration parsing" $ do
     describe "All type declarations" $ do
       it "parse a string" $ do
@@ -37,11 +43,11 @@ main = hspec $ do
       it "parse a float" $ do
         parse P.parseSExpr "" "(const oyler 2.71828)" `shouldParse` (P.SEConst "oyler" (P.SEType P.Float') (P.SELiteral "2.71828"))
 
-      it "parse a boolean value" $ do
+      it "parse a bool value" $ do
         parse P.parseSExpr "" "(var mybool Bool True)" `shouldParse` (P.SEVar "mybool" (P.SEType P.Bool') (P.SELiteral "True"))
 
-      it "parse unit value" $ do
-        parse P.parseSExpr "" "(var undef Unit ())" `shouldParse` (P.SEVar "undef" (P.SEType P.Unit') (P.SELiteral "()"))
+      it "parse a unit value" $ do
+        parse P.parseSExpr "" "(var nothing Unit ())" `shouldParse` (P.SEVar "nothing" (P.SEType P.Unit') (P.SELiteral "()"))
 
     describe "Explicit and implicit declaration" $ do
       it "parse a variable with explicit typing" $ do
@@ -62,54 +68,68 @@ main = hspec $ do
       it "parse a nested variable declaration and infer its type (should fail)" $ do
         parse P.parseSExpr "" `shouldFailOn` "(var hello_world (+ 5 6))" 
 
-  describe "Function declarations" $ do
-    it "parse a function that returns nothing." $ do
-      let func = """
-        (func does_nothing [] > Unit
-        \&  (return ()))\
-        \"""
-      parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
-        funcIdent = "does_nothing", 
-        funcArgs = [], 
-        funcReturnType = P.Unit', 
-        funcBody = [(P.SEReturn (P.SELiteral "()"))]
-      })
+  describe "Function parsing" $ do
+    describe "Function declarations" $ do
+      it "parse a function that returns nothing." $ do
+        let func = """
+          (func does_nothing [] > Unit
+          \&  (return ()))\
+          \"""
+        parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
+          funcIdent = "does_nothing", 
+          funcArgs = [], 
+          funcReturnType = P.Unit', 
+          funcBody = [(P.SEReturn (P.SELiteral "()"))]
+        })
 
-    it "parse a function that returns a value." $ do
-      let func = """
-        (func does_something [] > String
-        \&  (const something "just did something!")
-        \&  (print something)
-        \&  (return something))\
-        \"""
-      parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
-        funcIdent = "does_something", 
-        funcArgs = [], 
-        funcReturnType = P.String', 
-        funcBody = [(P.SEConst "something" (P.SEType P.String') (P.SELiteral "\"just did something!\"")),(P.SEPrint (P.SEIdentifier "something")),(P.SEReturn (P.SEIdentifier "something"))]
-      })
+      it "parse a function that returns a value." $ do
+        let func = """
+          (func does_something [] > String
+          \&  (const something "just did something!")
+          \&  (print something)
+          \&  (return something))\
+          \"""
+        parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
+          funcIdent = "does_something", 
+          funcArgs = [], 
+          funcReturnType = P.String', 
+          funcBody = [(P.SEConst "something" (P.SEType P.String') (P.SELiteral "\"just did something!\"")),(P.SEPrint (P.SEIdentifier "something")),(P.SEReturn (P.SEIdentifier "something"))]
+        })
 
-    it "parse a function with args that returns nothing." $ do
-      let func = """
-        (func increment_and_print [n ~ Int] > Unit 
-        \&  (print (+ 1 n))
-        \&  (return ()))\
-        \"""
-      parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
-        funcIdent = "increment_and_print",
-        funcArgs = [P.Arg {argIdent = "n", argType = P.Int'}],
-        funcReturnType = P.Unit',
-        funcBody = [(P.SEPrint ( P.SEBinary (P.Add) (P.SELiteral "1") (P.SEIdentifier "n"))),(P.SEReturn (P.SELiteral "()"))]
-      })
+      it "parse a function with args that returns nothing." $ do
+        let func = """
+          (func increment_and_print [n ~ Int] > Unit 
+          \&  (print (+ 1 n))
+          \&  (return ()))\
+          \"""
+        parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
+          funcIdent = "increment_and_print",
+          funcArgs = [P.Arg {argIdent = "n", argType = P.Int'}],
+          funcReturnType = P.Unit',
+          funcBody = [(P.SEPrint ( P.SEBinary (P.Add) (P.SELiteral "1") (P.SEIdentifier "n"))),(P.SEReturn (P.SELiteral "()"))]
+        })
 
-    it "parse a function with args that returns a value." $ do
-      let func = """
-        (func flip [b ~ Bool] > Bool 
-        \&  (not b))\
-        \"""
-      parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
-        funcIdent = "flip",
-        funcArgs = [P.Arg {argIdent = "b", argType = P.Bool'}],
-        funcReturnType = P.Bool',
-        funcBody = [(P.SEUnary (P.Not) (P.SEIdentifier "b"))]
-      })
+      it "parse a function with args that returns a value." $ do
+        let func = """
+          (func flip [b ~ Bool] > Bool 
+          \&  (not b))\
+          \"""
+        parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
+          funcIdent = "flip",
+          funcArgs = [P.Arg {argIdent = "b", argType = P.Bool'}],
+          funcReturnType = P.Bool',
+          funcBody = [(P.SEUnary (P.Not) (P.SEIdentifier "b"))]
+        })
+
+    describe "Function calls" $ do
+      it "parse a function call w/ a literal value" $ do
+        parse P.parseSExpr "" "(increment 9)" `shouldParse` (P.SEFuncCall P.FuncCall {
+          fcIdent = "increment",
+          fcArgs = [P.SELiteral "9"]
+        })
+
+      it "parse a function call w/ a nested expression" $ do
+        parse P.parseSExpr "" "(flip (== 10 5))" `shouldParse` (P.SEFuncCall P.FuncCall {
+          fcIdent = "flip",
+          fcArgs = [(P.SEBinary P.Equal (P.SELiteral "10") (P.SELiteral "5"))]
+        })

@@ -56,10 +56,17 @@ data Func = Func
   }
   deriving (Show, Eq)
 
+data FuncCall = FuncCall
+  { fcIdent   :: T.Text
+  , fcArgs    :: [SExpr]
+  }
+  deriving (Show, Eq)
+
 data SExpr = SEIdentifier T.Text
   | SELiteral T.Text
   | SEComment
   | SEFunc Func
+  | SEFuncCall FuncCall
   | SEReturn SExpr
   | SEPrint SExpr
   | SEType Type
@@ -193,19 +200,19 @@ parseVarDecl = do
 
     inferType :: T.Text -> Parser SExpr
     inferType v
+      | (count '.' v) == 1 =
+          if (==) 0 $ (removeDigits . T.filter ((/=) '.')) v
+          then pure $ SEType Float'
+          else failedTypeInference v
+      | removeDigits v == 0 = pure $ SEType Int'
       | (T.take 1 v) == "'" && (T.last v) == '\'' = pure $ SEType Char'
       | (T.take 1 v) == "\"" && (T.last v) == '"' = pure $ SEType String'
-      | (count '.' v) == 1 =
-        if T.foldl' isDigitText True $ T.filter ((/=) '.') v
-        then pure $ SEType Float'
-        else failedTypeInference v
-      | T.foldl' isDigitText True v = pure $ SEType Int'
       | v == "True" || v == "False" = pure $ SEType Bool'
       | v == "()" = pure $ SEType Unit'
       | otherwise = failedTypeInference v
         where
-          isDigitText :: Bool -> Char -> Bool
-          isDigitText = \acc c -> if isDigit c then (True || acc) else (False || acc)
+          removeDigits :: T.Text -> Int
+          removeDigits = T.length . T.filter (not . isDigit)
 
     count :: Char -> T.Text -> Int
     count t = (T.length . T.filter (t ==))
@@ -256,9 +263,9 @@ parseBinary = do
     (not b))
 
   (func say_hi [name ~ String] > Unit
-    (const with_hello (++ "hello " name))
+    (const with_hello String (++ "hello " name))
     (print with_hello)
-    (return ()) ; you can have an explicit return for variables.
+    (return ())
 -}
 parseFuncDecl :: Parser SExpr
 parseFuncDecl = do
@@ -291,16 +298,28 @@ parseFuncDecl = do
           ty <- parseType
           pure Arg {argIdent = ident, argType = ty}
 
+parseFuncCall :: Parser SExpr
+parseFuncCall = do
+  ident <- parseIdent
+  hspace1
+  args <- parseCallArgs
+  pure $ SEFuncCall FuncCall {fcIdent = ident, fcArgs = args}
+  where
+    parseCallArgs :: Parser [SExpr]
+    parseCallArgs = parseNested `sepBy` char ' '
+
 parseSExpr :: Parser SExpr
 parseSExpr = (between (char '(') (char ')') $ 
-  choice  [parseFuncDecl
-          , parseBinary
-          , parseUnary
-          , parseVarDecl
-          , parseSetStmt
-          , parseRet
-          , parsePrint
-          ]) <|> parseComment
+  label "valid S-Expression" 
+    (choice [parseFuncDecl
+            , parseBinary
+            , parseUnary
+            , parseVarDecl
+            , parseSetStmt
+            , parseRet
+            , parsePrint
+            , parseFuncCall
+            ])) <|> parseComment
 
 someFunc :: IO ()
 someFunc = putStrLn "this is someFunc from Liz/Parser.hs"

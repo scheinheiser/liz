@@ -3,7 +3,7 @@
 - [x] Parse basic expressions, like `var`, `set`, binary and unary things.
 - [x] Parse nested expressions.
 - [x] Basic type inference.
-- [ ] Parse more complex expressions, like `func` and function calls.
+- [x] Parse more complex expressions, like `func` and function calls.
 
 ## Semantic Analysis
 - [ ] Check that there's a `main` func, check that variables outside have the global tag? Up for change, really.

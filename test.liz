@@ -33,6 +33,7 @@
 
 (func say_hi [name ~ String] > Unit
   (const with_hello (++ "hello " name))
+  (print with_hello)
   (return ()) ; you can have an explicit return for variables.
 
 (func concat [s1 ~ String, s2 ~ String] > String

@@ -77,18 +77,32 @@ main = hspec $ do
 
     it "parse a function that returns a value." $ do
       let func = """
-        (func does_something [] > Unit
-        \&  (print "just did something!")
-        \&  (return ()))\
+        (func does_something [] > String
+        \&  (const something "just did something!")
+        \&  (print something)
+        \&  (return something))\
         \"""
       parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
         funcIdent = "does_something", 
         funcArgs = [], 
-        funcReturnType = P.Unit', 
-        funcBody = [(P.SEPrint (P.SELiteral "\"just did something!\"")),(P.SEReturn (P.SELiteral "()"))]
+        funcReturnType = P.String', 
+        funcBody = [(P.SEConst "something" (P.SEType P.String') (P.SELiteral "\"just did something!\"")),(P.SEPrint (P.SEIdentifier "something")),(P.SEReturn (P.SEIdentifier "something"))]
       })
 
-    it "parse a function with args." $ do
+    it "parse a function with args that returns nothing." $ do
+      let func = """
+        (func increment_and_print [n ~ Int] > Unit 
+        \&  (print (+ 1 n))
+        \&  (return ()))\
+        \"""
+      parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
+        funcIdent = "increment_and_print",
+        funcArgs = [P.Arg {argIdent = "n", argType = P.Int'}],
+        funcReturnType = P.Unit',
+        funcBody = [(P.SEPrint ( P.SEBinary (P.Add) (P.SELiteral "1") (P.SEIdentifier "n"))),(P.SEReturn (P.SELiteral "()"))]
+      })
+
+    it "parse a function with args that returns a value." $ do
       let func = """
         (func flip [b ~ Bool] > Bool 
         \&  (not b))\

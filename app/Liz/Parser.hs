@@ -70,12 +70,6 @@ data SExpr = SEIdentifier T.Text
   | SEUnary UnaryOp SExpr
   deriving (Show, Eq)
 
-lizReserved :: [T.Text]
-lizReserved = 
-  ["var", "set", "const", "if", "func", "return", "False",
-   "True", "undefined", "not", "negate", "Int", "Float", 
-   "String", "Char", "Bool", "print"]
-
 -- helper error functions
 failedTypeInference :: T.Text -> Parser a
 failedTypeInference = customFailure . E.FailedTypeInference
@@ -87,6 +81,12 @@ unsupportedDeclaration :: T.Text -> Parser a
 unsupportedDeclaration = customFailure . E.UnsupportedDeclaration
 
 -- helper parsing functions
+lizReserved :: [T.Text]
+lizReserved = 
+  ["var", "set", "const", "if", "func", "return", "False",
+    "True", "undefined", "not", "negate", "Int", "Float", 
+    "String", "Char", "Bool", "print"]
+
 parseType :: Parser Type
 parseType =
   Int' <$ string "Int" <|>
@@ -193,13 +193,13 @@ parseVarDecl = do
 
     inferType :: T.Text -> Parser SExpr
     inferType v
+      | (T.take 1 v) == "'" && (T.last v) == '\'' = pure $ SEType Char'
+      | (T.take 1 v) == "\"" && (T.last v) == '"' = pure $ SEType String'
       | (count '.' v) == 1 =
         if T.foldl' isDigitText True $ T.filter ((/=) '.') v
         then pure $ SEType Float'
         else failedTypeInference v
       | T.foldl' isDigitText True v = pure $ SEType Int'
-      | (T.take 1 v) == "'" && (T.last v) == '\'' = pure $ SEType Char'
-      | (T.take 1 v) == "\"" && (T.last v) == '"' = pure $ SEType String'
       | v == "True" || v == "False" = pure $ SEType Bool'
       | v == "()" = pure $ SEType Unit'
       | otherwise = failedTypeInference v
@@ -249,7 +249,6 @@ parseBinary = do
       SEBinary NotEql <$ string "!=" <|>
       SEBinary Greater <$ string ">" <|> 
       SEBinary Less <$ string "<"
-
 
 {-
   (func *ident* *args* *return type* *body*)

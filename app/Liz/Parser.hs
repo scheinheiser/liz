@@ -7,7 +7,8 @@ import qualified Liz.Error as E
 import qualified Data.Text as T
 
 import Data.String ( IsString (..))
-import Data.Char (isAlphaNum, isDigit, isLetter)
+import Data.Char (isAlphaNum, isDigit, isPrint)
+import Control.Monad (void)
 
 import Text.Megaparsec hiding (count)
 import Text.Megaparsec.Char
@@ -15,9 +16,6 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 default IsString (T.Text)
 type Parser = Parsec E.PError T.Text
-
-scn :: Parser ()
-scn = L.space space1 (L.skipLineComment ";") empty
 
 data Type = Int'
   | Float'
@@ -37,6 +35,7 @@ data BinaryOp = Add
   | NotEql
   | GreaterEql
   | LessEql
+  | Concat
   deriving (Show, Eq)
 
 data UnaryOp = Negate 
@@ -44,8 +43,8 @@ data UnaryOp = Negate
   deriving (Show, Eq)
 
 data Arg = Arg
-  { argIdent :: T.Text
-  , argType :: Type
+  { argIdent  :: T.Text
+  , argType   :: Type
   }
   deriving (Show, Eq)
 
@@ -53,18 +52,20 @@ data Func = Func
   { funcIdent       :: T.Text
   , funcArgs        :: [Arg]
   , funcReturnType  :: Type
-  -- , funcBody        :: [SExpr]
+  , funcBody        :: [SExpr]
   }
   deriving (Show, Eq)
 
 data SExpr = SEIdentifier T.Text
   | SELiteral T.Text
-  | SEReturn SExpr
+  | SEComment
   | SEFunc Func
+  | SEReturn SExpr
+  | SEPrint SExpr
   | SEType Type
-  | SEVar T.Text SExpr SExpr -- ident - type - value
+  | SEVar T.Text SExpr SExpr  -- ident - type - value
   | SEConst T.Text SExpr SExpr
-  | SESet T.Text SExpr -- ident - value
+  | SESet T.Text SExpr        -- ident - value
   | SEBinary BinaryOp SExpr SExpr
   | SEUnary UnaryOp SExpr
   deriving (Show, Eq)
@@ -73,7 +74,7 @@ lizReserved :: [T.Text]
 lizReserved = 
   ["var", "set", "const", "if", "func", "return", "False",
    "True", "undefined", "not", "negate", "Int", "Float", 
-   "String", "Char", "Bool"]
+   "String", "Char", "Bool", "print"]
 
 -- helper error functions
 failedTypeInference :: T.Text -> Parser a
@@ -99,7 +100,7 @@ parseValue :: Parser T.Text
 parseValue = choice [parseStr, parseChar, parseNum, parseBool, parseUnit]
 
 parseNested :: Parser SExpr
-parseNested = (SELiteral <$> parseValue) <|> (SEIdentifier <$> parseIdent) <|> parseSExpr
+parseNested = choice [SELiteral <$> parseValue, SEIdentifier <$> parseIdent, parseSExpr]
 
 -- main parsing functions
 parseIdent :: Parser T.Text
@@ -121,12 +122,12 @@ parseUnit = string "()"
 parseStr :: Parser T.Text
 parseStr = do
   d1 <- char '"'
-  str <- takeWhile1P (Just "alphanumeric character.") valid 
+  str <- takeWhile1P (Just "alphanumeric character.") valid
   d2 <- char '"'
   pure $ (d1 T.:< str) T.:> d2
   where
     valid :: Char -> Bool
-    valid = liftA2 (||) isAlphaNum (' ' ==)
+    valid = liftA2 (&&) isPrint ('"' /=)
 
 parseChar :: Parser T.Text
 parseChar = do
@@ -136,22 +137,41 @@ parseChar = do
   pure $ T.pack [d1, c, d2]
 
 parseNum :: Parser T.Text
-parseNum = do
-  n <- (takeWhile1P (Just "digits 0-9 or '.'") valid) <* notFollowedBy letterChar
-  pure n
+parseNum = (takeWhile1P (Just "digits 0-9 or '.'") valid) <* notFollowedBy letterChar
   where
     valid :: Char -> Bool
     valid = liftA2 (||) isDigit ('.' ==) 
 
 parseBool :: Parser T.Text
-parseBool = do
-  b <- (takeWhile1P (Just "letter") isLetter) <* notFollowedBy digitChar
-  pure b
+parseBool = string "True" <|> string "False"
+
+parsePrint :: Parser SExpr
+parsePrint = do
+  _ <- string "print"
+  hspace1
+  v <- parseNested
+  pure $ SEPrint v
+
+parseRet :: Parser SExpr
+parseRet = do
+  _ <- string "return"
+  hspace1
+  v <- parseNested
+  pure $ SEReturn v
+
+parseComment :: Parser SExpr
+parseComment = do
+  _ <- char ';'
+  _ <- hidden $ some $ alphaNumChar <|> punctuationChar <|> char ' '
+  pure SEComment
 
 {-
   (var *ident* *type* *value*)
   (var hello String "World")
   (var four 4) ; inferred Int 
+  (var not_allowed (+ 5 6))
+                    ^ For now, you can't declare a variable with inferred type using a nested statement.
+                      Maybe I'll add support later on.
 -}
 parseVarDecl :: Parser SExpr
 parseVarDecl = do
@@ -217,7 +237,9 @@ parseBinary = do
   right <- parseNested
   pure $ op left right
   where
-    parseBinaryOp = SEBinary Add <$ string "+" <|> 
+    parseBinaryOp = 
+      SEBinary Concat <$ string "++" <|>
+      SEBinary Add <$ string "+" <|> 
       SEBinary Subtract <$ string "-" <|> 
       SEBinary Multiply <$ string "*" <|> 
       SEBinary Divide <$ string "/" <|> 
@@ -228,26 +250,19 @@ parseBinary = do
       SEBinary Greater <$ string ">" <|> 
       SEBinary Less <$ string "<"
 
+
 {-
-data Arg = Arg
-  { argIdent :: T.Text
-  , argType :: Type
-  }
-
-data Func = Func 
-  { funcIdent ``    :: T.Text
-  , funcArgs        :: [Arg]
-  , funcReturnType  :: Type
-  , funcBody        :: [SExpr]
-  }
-
   (func *ident* *args* *return type* *body*)
-  (func increment [number ~ Int] > Int
-    (+ number 1)) ; the last executed sexpr's value is returned.
+  (func flip [b ~ Bool] > Bool 
+    (not b))
+
+  (func say_hi [name ~ String] > Unit
+    (const with_hello (++ "hello " name))
+    (print with_hello)
+    (return ()) ; you can have an explicit return for variables.
 -}
 parseFuncDecl :: Parser SExpr
 parseFuncDecl = do
-  -- p <- L.indentLevel >>= L.indentGuard scn GT
   _ <- string "func"
   hspace1
   ident <- parseIdent
@@ -257,8 +272,13 @@ parseFuncDecl = do
   _ <- char '>'
   hidden hspace
   retTy <- parseType
-  pure $ SEFunc Func {funcIdent = ident, funcArgs = args, funcReturnType = retTy}
+
+  block <- some $ L.lineFold scn $ \_ -> parseSExpr
+  pure $ SEFunc Func {funcIdent = ident, funcArgs = args, funcReturnType = retTy, funcBody = block}
   where
+    scn :: Parser ()
+    scn = L.space space1 (void $ spaceChar <|> tab) empty
+
     parseFuncArgs :: Parser [Arg]
     parseFuncArgs = between (char '[') (char ']') $ aux `sepBy` char ','
       where
@@ -270,10 +290,18 @@ parseFuncDecl = do
           _ <- char '~'
           hidden hspace
           ty <- parseType
-          pure Arg { argIdent = ident, argType = ty}
+          pure Arg {argIdent = ident, argType = ty}
 
 parseSExpr :: Parser SExpr
-parseSExpr = between (char '(') (char ')') $ choice [parseFuncDecl, parseBinary, parseUnary, parseVarDecl, parseSetStmt]
+parseSExpr = (between (char '(') (char ')') $ 
+  choice  [parseFuncDecl
+          , parseBinary
+          , parseUnary
+          , parseVarDecl
+          , parseSetStmt
+          , parseRet
+          , parsePrint
+          ]) <|> parseComment
 
 someFunc :: IO ()
 someFunc = putStrLn "this is someFunc from Liz/Parser.hs"

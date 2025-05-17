@@ -29,7 +29,7 @@ test-suite liz-test
     import:           warnings
     default-language: GHC2024
     other-modules: Liz.Parser, Liz.Error
-    other-extensions: OverloadedStrings, NamedDefaults
+    other-extensions: OverloadedStrings, MultilineStrings
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test, app
     main-is:          Main.hs

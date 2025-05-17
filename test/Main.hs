@@ -1,14 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE MultilineStrings #-}
 module Main (main) where
+
+import qualified Liz.Parser as P
 
 import Test.Hspec
 import Test.Hspec.Megaparsec
-
--- import qualified Data.Text as T
 import Text.Megaparsec
--- import Text.Megaparsec.Char
-
-import qualified Liz.Parser as P
 
 main :: IO ()
 main = hspec $ do
@@ -63,3 +61,41 @@ main = hspec $ do
 
       it "parse a nested variable declaration and infer its type (should fail)" $ do
         parse P.parseSExpr "" `shouldFailOn` "(var hello_world (+ 5 6))" 
+
+  describe "Function declarations" $ do
+    it "parse a function that returns nothing." $ do
+      let func = """
+        (func does_nothing [] > Unit
+        \&  (return ()))\
+        \"""
+      parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
+        funcIdent = "does_nothing", 
+        funcArgs = [], 
+        funcReturnType = P.Unit', 
+        funcBody = [(P.SEReturn (P.SELiteral "()"))]
+      })
+
+    it "parse a function that returns a value." $ do
+      let func = """
+        (func does_something [] > Unit
+        \&  (print "just did something!")
+        \&  (return ()))\
+        \"""
+      parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
+        funcIdent = "does_something", 
+        funcArgs = [], 
+        funcReturnType = P.Unit', 
+        funcBody = [(P.SEPrint (P.SELiteral "\"just did something!\"")),(P.SEReturn (P.SELiteral "()"))]
+      })
+
+    it "parse a function with args." $ do
+      let func = """
+        (func flip [b ~ Bool] > Bool 
+        \&  (not b))\
+        \"""
+      parse P.parseSExpr "" func `shouldParse` (P.SEFunc P.Func {
+        funcIdent = "flip",
+        funcArgs = [P.Arg {argIdent = "b", argType = P.Bool'}],
+        funcReturnType = P.Bool',
+        funcBody = [(P.SEUnary (P.Not) (P.SEIdentifier "b"))]
+      })

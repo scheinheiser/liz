@@ -1,13 +1,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NamedDefaults #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Liz.Parser where
 
 import qualified Liz.Error as E
 import qualified Data.Text as T
 
+import Text.Printf (printf)
 import Data.String ( IsString (..))
 import Data.Char (isAlphaNum, isDigit, isPrint)
+import Data.List (intercalate)
 import Control.Monad (void)
 
 import Text.Megaparsec hiding (count)
@@ -46,7 +49,10 @@ data Arg = Arg
   { argIdent  :: T.Text
   , argType   :: Type
   }
-  deriving (Show, Eq)
+  deriving (Eq)
+
+instance Show Arg where
+  show (Arg {..}) = printf "%v: %v" argIdent (show argType)
 
 data Func = Func 
   { funcIdent       :: T.Text
@@ -71,7 +77,22 @@ data SExpr = SEIdentifier T.Text
   | SEBinary    LizPos BinaryOp SExpr SExpr
   | SEUnary     LizPos UnaryOp SExpr
   | SEEOF
-  deriving (Show, Eq)
+  deriving (Eq)
+
+instance Show SExpr where
+  show (SEIdentifier iden) = show iden
+  show (SELiteral (_) lit) = printf "%v" lit
+  show (SEUnary (line, col) op r) = printf "%v:%v %v %v" (unPos line) (unPos col) (show op) (show r)
+  show (SEBinary (line, col) op l r) = printf "%v:%v %v %v %v" (unPos line) (unPos col) (show l) (show op) (show r)
+  show (SEVar (line, col) ident ty v) = printf "%v:%v var %v: %v = %v\n" (unPos line) (unPos col) ident (show ty) (show v)
+  show (SEConst (line, col) ident ty v) = printf "%v:%v const %v: %v = %v\n" (unPos line) (unPos col) ident (show ty) (show v)
+  show (SESet (line, col) ident v) = printf "%v:%v set %v = %v\n" (unPos line) (unPos col) ident (show v)
+  show (SEReturn (line, col) v) = printf "%v:%v ret( %v )\n" (unPos line) (unPos col) (show v)
+  show (SEPrint (line, col) v) = printf "%v:%v print( %v )\n" (unPos line) (unPos col) (show v)
+  show (SEFuncCall (line, col) ident l) = printf "%v:%v %v( %v )" (unPos line) (unPos col) ident (foldMap show l)
+  show (SEFunc Func{..}) = printf "%v:%v func %v(%v) -> %v {\n%v}\n" (unPos $ fst funcPos) (unPos $ snd funcPos) funcIdent (intercalate ", " $ map show funcArgs) (show funcReturnType) (concatMap ((<>) "  " . show) funcBody)
+  show (SEType ty) = printf "%v" (show ty)
+  show _ = ""
 
 newtype Program = Program [SExpr]
   deriving (Show, Eq)
@@ -98,8 +119,8 @@ getCurrentPos = getSourcePos >>= \p -> pure (sourceLine p, sourceColumn p)
 lizReserved :: [T.Text]
 lizReserved = 
   ["var", "set", "const", "if", "func", "return", "False",
-    "True", "undefined", "not", "negate", "Int", "Float", 
-    "String", "Char", "Bool", "print"]
+  "True", "undefined", "not", "negate", "Int", "Float", 
+  "String", "Char", "Bool", "print"]
 
 parseType :: Parser Type
 parseType =
@@ -129,8 +150,8 @@ parseIdent = do
   then reservedIdent ident
   else pure $ ident
   where
-    valid :: Char -> Bool 
-    valid = liftA2 (||) isAlphaNum ('_' ==)
+  valid :: Char -> Bool 
+  valid = liftA2 (||) isAlphaNum ('_' ==)
 
 parseUnit :: Parser T.Text
 parseUnit = string "()"
@@ -145,8 +166,8 @@ parseStr = do
   d2 <- char '"'
   pure $ (d1 T.:< str) T.:> d2
   where
-    valid :: Char -> Bool
-    valid = liftA2 (&&) isPrint ('"' /=)
+  valid :: Char -> Bool
+  valid = liftA2 (&&) isPrint ('"' /=)
 
 parseChar :: Parser T.Text
 parseChar = do
@@ -158,8 +179,8 @@ parseChar = do
 parseNum :: Parser T.Text
 parseNum = (takeWhile1P (Just "digits 0-9 or '.'") valid) <* notFollowedBy letterChar
   where
-    valid :: Char -> Bool
-    valid = liftA2 (||) isDigit ('.' ==) 
+  valid :: Char -> Bool
+  valid = liftA2 (||) isDigit ('.' ==) 
 
 parseBool :: Parser T.Text
 parseBool = string "True" <|> string "False"
@@ -188,12 +209,12 @@ parseComment = do
 
 {-
   ({var | const} *ident* *type* *value*)
-  (var hello String "World")
-  (const four 4) ; inferred Int 
-  (var not_allowed (+ 5 6))
-                    ^ For now, you can't declare a variable with inferred type using a nested statement.
-                      Maybe I'll add support later on.
--}
+    (var hello String "World")
+    (const four 4) ; inferred Int 
+    (var not_allowed (+ 5 6))
+                      ^ For now, you can't declare a variable with inferred type using a nested statement.
+                        Maybe I'll add support later on.
+    -}
 parseVarDecl :: Parser SExpr
 parseVarDecl = do
   p <- getCurrentPos
@@ -216,9 +237,9 @@ parseVarDecl = do
     inferType :: T.Text -> Parser SExpr
     inferType v
       | (count '.' v) == 1 =
-          if (==) 0 $ (removeDigits . T.filter ((/=) '.')) v
-          then pure $ SEType Float'
-          else failedTypeInference v
+        if (==) 0 $ (removeDigits . T.filter ((/=) '.')) v
+        then pure $ SEType Float'
+        else failedTypeInference v
       | removeDigits v == 0 = pure $ SEType Int'
       | (T.take 1 v) == "'" && (T.last v) == '\'' = pure $ SEType Char'
       | (T.take 1 v) == "\"" && (T.last v) == '"' = pure $ SEType String'
@@ -226,9 +247,9 @@ parseVarDecl = do
       | v == "()" = pure $ SEType Unit'
       | v == "undefined" = inferredUndefined
       | otherwise = failedTypeInference v
-        where
-          removeDigits :: T.Text -> Int
-          removeDigits = T.length . T.filter (not . isDigit)
+      where
+        removeDigits :: T.Text -> Int
+        removeDigits = T.length . T.filter (not . isDigit)
 
     count :: Char -> T.Text -> Int
     count t = (T.length . T.filter (t ==))
@@ -251,7 +272,7 @@ parseUnary = do
   v <- parseNested
   pure $ op v
   where
-    parseUnaryOp p = SEUnary p Not <$ string "not" <|> SEUnary p Negate <$ string "negate"
+  parseUnaryOp p = SEUnary p Not <$ string "not" <|> SEUnary p Negate <$ string "negate"
 
 parseBinary :: Parser SExpr
 parseBinary = do
@@ -278,45 +299,45 @@ parseBinary = do
 
 {-
   (func *ident* *args* *return type* *body*)
-  (func flip [b ~ Bool] > Bool 
-    (not b))
+    (func flip [b ~ Bool] > Bool 
+     (not b))
 
-  (func say_hi [name ~ String] > Unit
-    (const with_hello String (++ "hello " name))
-    (print with_hello)
-    (return ())
+    (func say_hi [name ~ String] > Unit
+     (const with_hello String (++ "hello " name))
+     (print with_hello)
+     (return ())
 -}
 parseFuncDecl :: Parser SExpr
 parseFuncDecl = do
-  p <- getCurrentPos
-  _ <- string "func"
-  hspace1
-  ident <- parseIdent
-  hspace1
-  args <- parseFuncArgs
-  hidden hspace
-  _ <- char '>'
-  hidden hspace
-  retTy <- parseType
+   p <- getCurrentPos
+   _ <- string "func"
+   hspace1
+   ident <- parseIdent
+   hspace1
+   args <- parseFuncArgs
+   hidden hspace
+   _ <- char '>'
+   hidden hspace
+   retTy <- parseType
 
-  block <- some $ L.lineFold scn $ \_ -> parseSExpr
-  pure $ SEFunc Func {funcIdent = ident, funcPos = p, funcArgs = args, funcReturnType = retTy, funcBody = block}
-  where
-    scn :: Parser ()
-    scn = L.space space1 (void $ spaceChar <|> tab) empty
+   block <- some $ L.lineFold scn $ \_ -> parseSExpr
+   pure $ SEFunc Func {funcIdent = ident, funcPos = p, funcArgs = args, funcReturnType = retTy, funcBody = block}
+   where
+     scn :: Parser ()
+     scn = L.space space1 (void $ spaceChar <|> tab) empty
 
-    parseFuncArgs :: Parser [Arg]
-    parseFuncArgs = between (char '[') (char ']') $ aux `sepBy` char ','
-      where
-        aux :: Parser Arg
-        aux = do
-          hidden hspace
-          ident <- parseIdent
-          hidden hspace
-          _ <- char '~'
-          hidden hspace
-          ty <- parseType
-          pure Arg {argIdent = ident, argType = ty}
+     parseFuncArgs :: Parser [Arg]
+     parseFuncArgs = between (char '[') (char ']') $ aux `sepBy` char ','
+       where
+         aux :: Parser Arg
+         aux = do
+           hidden hspace
+           ident <- parseIdent
+           hidden hspace
+           _ <- char '~'
+           hidden hspace
+           ty <- parseType
+           pure Arg {argIdent = ident, argType = ty}
 
 parseFuncCall :: Parser SExpr
 parseFuncCall = do
@@ -356,6 +377,13 @@ parseFile f fc = do
   case (parse parseProgram f fc) of
     (Left err) -> Left err
     (Right v) -> Right $ Program v
+
+parseAndPP :: FilePath -> IO ()
+parseAndPP f = do
+  fc <- readFile f >>= pure . T.pack
+  case (parse parseProgram f fc) of
+    (Left err) -> putStrLn $ errorBundlePretty err
+    (Right v) -> putStrLn $ foldMap show v
 
 someFunc :: IO ()
 someFunc = putStrLn "this is someFunc from Liz/Parser.hs"

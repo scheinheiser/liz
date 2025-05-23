@@ -50,6 +50,7 @@ data Arg = Arg
 
 data Func = Func 
   { funcIdent       :: T.Text
+  , funcPos         :: LizPos
   , funcArgs        :: [Arg]
   , funcReturnType  :: Type
   , funcBody        :: [SExpr]
@@ -57,22 +58,25 @@ data Func = Func
   deriving (Show, Eq)
 
 data SExpr = SEIdentifier T.Text
-  | SELiteral   T.Text
+  | SELiteral   LizPos T.Text
   | SEComment
   | SEFunc      Func
-  | SEFuncCall  T.Text [SExpr] -- ident - values
-  | SEReturn    SExpr
-  | SEPrint     SExpr
+  | SEFuncCall  LizPos T.Text [SExpr] -- ident - values
+  | SEReturn    LizPos SExpr
+  | SEPrint     LizPos SExpr
   | SEType      Type
-  | SEVar       T.Text SExpr SExpr  -- ident - type - value
-  | SEConst     T.Text SExpr SExpr
-  | SESet       T.Text SExpr        -- ident - value
-  | SEBinary    BinaryOp SExpr SExpr
-  | SEUnary     UnaryOp SExpr
+  | SEVar       LizPos T.Text SExpr SExpr  -- ident - type - value
+  | SEConst     LizPos T.Text SExpr SExpr
+  | SESet       LizPos T.Text SExpr        -- ident - value
+  | SEBinary    LizPos BinaryOp SExpr SExpr
+  | SEUnary     LizPos UnaryOp SExpr
   | SEEOF
   deriving (Show, Eq)
 
 newtype Program = Program [SExpr]
+  deriving (Show, Eq)
+
+type LizPos = (Pos, Pos)
 
 -- helper error functions
 failedTypeInference :: T.Text -> Parser a
@@ -88,6 +92,9 @@ inferredUndefined :: Parser a
 inferredUndefined = customFailure E.InferredUndefined
 
 -- helper parsing functions
+getCurrentPos :: Parser (Pos, Pos) 
+getCurrentPos = getSourcePos >>= \p -> pure (sourceLine p, sourceColumn p)
+
 lizReserved :: [T.Text]
 lizReserved = 
   ["var", "set", "const", "if", "func", "return", "False",
@@ -107,7 +114,9 @@ parseValue :: Parser T.Text
 parseValue = choice [parseStr, parseChar, parseNum, parseBool, parseUndefined, parseUnit]
 
 parseNested :: Parser SExpr
-parseNested = choice [SELiteral <$> parseValue, SEIdentifier <$> parseIdent, parseSExpr]
+parseNested = do
+  p <- getCurrentPos
+  choice [SELiteral p <$> parseValue, SEIdentifier <$> parseIdent, parseSExpr]
 
 -- main parsing functions
 parseIdent :: Parser T.Text
@@ -157,17 +166,19 @@ parseBool = string "True" <|> string "False"
 
 parsePrint :: Parser SExpr
 parsePrint = do
+  p <- getCurrentPos
   _ <- string "print"
   hspace1
   v <- parseNested
-  pure $ SEPrint v
+  pure $ SEPrint p v
 
 parseRet :: Parser SExpr
 parseRet = do
+  p <- getCurrentPos
   _ <- string "return"
   hspace1
   v <- parseNested
-  pure $ SEReturn v
+  pure $ SEReturn p v
 
 parseComment :: Parser SExpr
 parseComment = do
@@ -185,7 +196,8 @@ parseComment = do
 -}
 parseVarDecl :: Parser SExpr
 parseVarDecl = do
-  decType <- SEVar <$ string "var" <|> SEConst <$ string "const"
+  p <- getCurrentPos
+  decType <- SEVar p <$ string "var" <|> SEConst p <$ string "const"
   hspace1
   ident <- parseIdent
   hspace1 
@@ -196,7 +208,7 @@ parseVarDecl = do
       hspace1
       value <- parseNested
       pure $ decl iden ty value
-    aux decl iden lit@(SELiteral literal) = do
+    aux decl iden lit@(SELiteral _ literal) = do
       ty <- inferType literal
       pure $ decl iden ty lit
     aux _ _ op = unsupportedDeclaration $ T.show op
@@ -223,43 +235,46 @@ parseVarDecl = do
 
 parseSetStmt :: Parser SExpr
 parseSetStmt = do
+  p <- getCurrentPos
   _ <- string "set"
   hspace1
   ident <- parseIdent
   hspace1
   value <- parseNested
-  pure $ SESet ident value
+  pure $ SESet p ident value
 
 parseUnary :: Parser SExpr
 parseUnary = do
-  op <- parseUnaryOp
+  p <- getCurrentPos
+  op <- parseUnaryOp p
   hspace1
   v <- parseNested
   pure $ op v
   where
-    parseUnaryOp = SEUnary Not <$ string "not" <|> SEUnary Negate <$ string "negate"
+    parseUnaryOp p = SEUnary p Not <$ string "not" <|> SEUnary p Negate <$ string "negate"
 
 parseBinary :: Parser SExpr
 parseBinary = do
-  op <- parseBinaryOp
+  p <- getCurrentPos
+  op <- parseBinaryOp p
   hspace1
   left <- parseNested
   hspace1
   right <- parseNested
   pure $ op left right
   where
-    parseBinaryOp = 
-      SEBinary Concat <$ string "++" <|>
-      SEBinary Add <$ string "+" <|> 
-      SEBinary Subtract <$ string "-" <|> 
-      SEBinary Multiply <$ string "*" <|> 
-      SEBinary Divide <$ string "/" <|> 
-      SEBinary GreaterEql <$ string ">=" <|> 
-      SEBinary LessEql <$ string "<=" <|> 
-      SEBinary Equal <$ string "==" <|> 
-      SEBinary NotEql <$ string "!=" <|>
-      SEBinary Greater <$ string ">" <|> 
-      SEBinary Less <$ string "<"
+    parseBinaryOp p = 
+      SEBinary p Concat <$ string "++" <|>
+      SEBinary p Add <$ string "+" <|> 
+      SEBinary p Subtract <$ string "-" <|> 
+      SEBinary p Multiply <$ string "*" <|> 
+      SEBinary p Divide <$ string "/" <|> 
+      SEBinary p GreaterEql <$ string ">=" <|> 
+      SEBinary p LessEql <$ string "<=" <|> 
+      SEBinary p Equal <$ string "==" <|> 
+      SEBinary p NotEql <$ string "!=" <|>
+      SEBinary p Greater <$ string ">" <|> 
+      SEBinary p Less <$ string "<"
 
 {-
   (func *ident* *args* *return type* *body*)
@@ -273,6 +288,7 @@ parseBinary = do
 -}
 parseFuncDecl :: Parser SExpr
 parseFuncDecl = do
+  p <- getCurrentPos
   _ <- string "func"
   hspace1
   ident <- parseIdent
@@ -284,7 +300,7 @@ parseFuncDecl = do
   retTy <- parseType
 
   block <- some $ L.lineFold scn $ \_ -> parseSExpr
-  pure $ SEFunc Func {funcIdent = ident, funcArgs = args, funcReturnType = retTy, funcBody = block}
+  pure $ SEFunc Func {funcIdent = ident, funcPos = p, funcArgs = args, funcReturnType = retTy, funcBody = block}
   where
     scn :: Parser ()
     scn = L.space space1 (void $ spaceChar <|> tab) empty
@@ -304,10 +320,11 @@ parseFuncDecl = do
 
 parseFuncCall :: Parser SExpr
 parseFuncCall = do
+  p <- getCurrentPos
   ident <- parseIdent
   hspace1
   args <- parseCallArgs
-  pure $ SEFuncCall ident args
+  pure $ SEFuncCall p ident args
   where
     parseCallArgs :: Parser [SExpr]
     parseCallArgs = parseNested `sepBy` char ' '
@@ -334,12 +351,11 @@ parseProgram = do
     scn :: Parser ()
     scn = L.space space1 (L.skipLineComment ";") empty
 
-parseFile :: FilePath -> IO ()
-parseFile f = do
-  fc <- readFile f >>= pure . T.pack
+parseFile :: FilePath -> T.Text -> Either (ParseErrorBundle T.Text E.PError) Program
+parseFile f fc = do
   case (parse parseProgram f fc) of
-    (Left err) -> putStrLn $ errorBundlePretty err
-    (Right v) -> putStrLn $ show v
+    (Left err) -> Left err
+    (Right v) -> Right $ Program v
 
 someFunc :: IO ()
 someFunc = putStrLn "this is someFunc from Liz/Parser.hs"

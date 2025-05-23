@@ -23,13 +23,13 @@
 
 ; (func *ident* *args* *return type* *body*)
 (func increment [number ~ Int] > Int
-  (+ number 1)) ; the last executed sexpr's value is returned.
+  (return (+ number 1))) ; explicit returns (for now)
 
 (func decrement [number ~ Int] > Int
-  (- number 1))
+  (return (- number 1)))
 
 (func flip [b ~ Bool] > Bool 
-  (not b))
+  (return (not b)))
 
 (func say_hi [name ~ String] > Unit
   (const with_hello String (++ "hello " name))
@@ -37,7 +37,7 @@
   (return ())) ; you can have an explicit return for variables.
 
 (func concat [s1 ~ String, s2 ~ String] > String
-  (++ s1 s2))
+  (return (++ s1 s2)))
 
 (func do_nothing [] > Unit
   (return ()))

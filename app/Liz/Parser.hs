@@ -56,26 +56,23 @@ data Func = Func
   }
   deriving (Show, Eq)
 
-data FuncCall = FuncCall
-  { fcIdent   :: T.Text
-  , fcArgs    :: [SExpr]
-  }
+data SExpr = SEIdentifier T.Text
+  | SELiteral   T.Text
+  | SEComment
+  | SEFunc      Func
+  | SEFuncCall  T.Text [SExpr] -- ident - values
+  | SEReturn    SExpr
+  | SEPrint     SExpr
+  | SEType      Type
+  | SEVar       T.Text SExpr SExpr  -- ident - type - value
+  | SEConst     T.Text SExpr SExpr
+  | SESet       T.Text SExpr        -- ident - value
+  | SEBinary    BinaryOp SExpr SExpr
+  | SEUnary     UnaryOp SExpr
+  | SEEOF
   deriving (Show, Eq)
 
-data SExpr = SEIdentifier T.Text
-  | SELiteral T.Text
-  | SEComment
-  | SEFunc Func
-  | SEFuncCall FuncCall
-  | SEReturn SExpr
-  | SEPrint SExpr
-  | SEType Type
-  | SEVar T.Text SExpr SExpr  -- ident - type - value
-  | SEConst T.Text SExpr SExpr
-  | SESet T.Text SExpr        -- ident - value
-  | SEBinary BinaryOp SExpr SExpr
-  | SEUnary UnaryOp SExpr
-  deriving (Show, Eq)
+newtype Program = Program [SExpr]
 
 -- helper error functions
 failedTypeInference :: T.Text -> Parser a
@@ -87,6 +84,9 @@ reservedIdent = customFailure . E.ReservedIdent
 unsupportedDeclaration :: T.Text -> Parser a
 unsupportedDeclaration = customFailure . E.UnsupportedDeclaration
 
+inferredUndefined :: Parser a
+inferredUndefined = customFailure E.InferredUndefined
+
 -- helper parsing functions
 lizReserved :: [T.Text]
 lizReserved = 
@@ -96,15 +96,15 @@ lizReserved =
 
 parseType :: Parser Type
 parseType =
-  Int' <$ string "Int" <|>
-  Float' <$ string "Float" <|>
+  Int'    <$ string "Int" <|>
+  Float'  <$ string "Float" <|>
   String' <$ string "String" <|>
-  Char' <$ string "Char" <|>
-  Bool' <$ string "Bool" <|>
-  Unit' <$ string "Unit"
+  Char'   <$ string "Char" <|>
+  Bool'   <$ string "Bool" <|>
+  Unit'   <$ string "Unit"
 
 parseValue :: Parser T.Text
-parseValue = choice [parseStr, parseChar, parseNum, parseBool, parseUnit]
+parseValue = choice [parseStr, parseChar, parseNum, parseBool, parseUndefined, parseUnit]
 
 parseNested :: Parser SExpr
 parseNested = choice [SELiteral <$> parseValue, SEIdentifier <$> parseIdent, parseSExpr]
@@ -125,6 +125,9 @@ parseIdent = do
 
 parseUnit :: Parser T.Text
 parseUnit = string "()"
+
+parseUndefined :: Parser T.Text
+parseUndefined = string "undefined"
 
 parseStr :: Parser T.Text
 parseStr = do
@@ -173,9 +176,9 @@ parseComment = do
   pure SEComment
 
 {-
-  (var *ident* *type* *value*)
+  ({var | const} *ident* *type* *value*)
   (var hello String "World")
-  (var four 4) ; inferred Int 
+  (const four 4) ; inferred Int 
   (var not_allowed (+ 5 6))
                     ^ For now, you can't declare a variable with inferred type using a nested statement.
                       Maybe I'll add support later on.
@@ -209,6 +212,7 @@ parseVarDecl = do
       | (T.take 1 v) == "\"" && (T.last v) == '"' = pure $ SEType String'
       | v == "True" || v == "False" = pure $ SEType Bool'
       | v == "()" = pure $ SEType Unit'
+      | v == "undefined" = inferredUndefined
       | otherwise = failedTypeInference v
         where
           removeDigits :: T.Text -> Int
@@ -303,7 +307,7 @@ parseFuncCall = do
   ident <- parseIdent
   hspace1
   args <- parseCallArgs
-  pure $ SEFuncCall FuncCall {fcIdent = ident, fcArgs = args}
+  pure $ SEFuncCall ident args
   where
     parseCallArgs :: Parser [SExpr]
     parseCallArgs = parseNested `sepBy` char ' '
@@ -320,6 +324,22 @@ parseSExpr = (between (char '(') (char ')') $
             , parsePrint
             , parseFuncCall
             ])) <|> parseComment
+
+parseProgram :: Parser [SExpr]
+parseProgram = do
+  r <- some $ try $ scn >> parseSExpr
+  scn
+  pure r
+  where
+    scn :: Parser ()
+    scn = L.space space1 (L.skipLineComment ";") empty
+
+parseFile :: FilePath -> IO ()
+parseFile f = do
+  fc <- readFile f >>= pure . T.pack
+  case (parse parseProgram f fc) of
+    (Left err) -> putStrLn $ errorBundlePretty err
+    (Right v) -> putStrLn $ show v
 
 someFunc :: IO ()
 someFunc = putStrLn "this is someFunc from Liz/Parser.hs"

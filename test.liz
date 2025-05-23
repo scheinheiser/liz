@@ -6,12 +6,12 @@
   (var four 4) ; inferred Int
   (var hello String "World")
 
-  (var no-value Bool undefined) ; this is treated like 'nil' in other languages.
-  (var forty Int undefined)
+  (var no_value Bool ()) ; this is treated like 'nil' in other languages.
+  (var forty Int ())
 
   ; (set *declared variable* *new value*)
   ; It must have the same type of the previous value.
-  (set no-value False)
+  (set no_value False)
   (set forty (* four 10))
 
   ; (const *ident* *optional type* value)
@@ -32,13 +32,12 @@
   (not b))
 
 (func say_hi [name ~ String] > Unit
-  (const with_hello (++ "hello " name))
+  (const with_hello String (++ "hello " name))
   (print with_hello)
-  (return ()) ; you can have an explicit return for variables.
+  (return ())) ; you can have an explicit return for variables.
 
 (func concat [s1 ~ String, s2 ~ String] > String
   (++ s1 s2))
 
 (func do_nothing [] > Unit
-  (return ())
-
+  (return ()))

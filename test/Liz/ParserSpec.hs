@@ -1,15 +1,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE MultilineStrings #-}
-module Main (main) where
 
-import qualified Liz.Parser as P
+module Liz.ParserSpec (spec) where
 
 import Test.Hspec
 import Test.Hspec.Megaparsec
 import Text.Megaparsec
 
-main :: IO ()
-main = hspec $ do
+import qualified Liz.Parser as P
+
+spec :: Spec
+spec = do
   describe "Literal parsing" $ do
     it "parse a string" $ do
       parse P.parseStr "" "\"Hello World\"" `shouldParse` "\"Hello World\""
@@ -123,13 +124,7 @@ main = hspec $ do
 
     describe "Function calls" $ do
       it "parse a function call w/ a literal value" $ do
-        parse P.parseSExpr "" "(increment 9)" `shouldParse` (P.SEFuncCall P.FuncCall {
-          fcIdent = "increment",
-          fcArgs = [P.SELiteral "9"]
-        })
+        parse P.parseSExpr "" "(increment 9)" `shouldParse` (P.SEFuncCall "increment" [P.SELiteral "9"])
 
       it "parse a function call w/ a nested expression" $ do
-        parse P.parseSExpr "" "(flip (== 10 5))" `shouldParse` (P.SEFuncCall P.FuncCall {
-          fcIdent = "flip",
-          fcArgs = [(P.SEBinary P.Equal (P.SELiteral "10") (P.SELiteral "5"))]
-        })
+        parse P.parseSExpr "" "(flip (== 10 5))" `shouldParse` (P.SEFuncCall "flip" [(P.SEBinary P.Equal (P.SELiteral "10") (P.SELiteral "5"))])

@@ -23,7 +23,7 @@ data BinaryOp = Add
   | Divide
   | Greater
   | Less 
-  | Equal 
+  | Eql 
   | NotEql
   | GreaterEql
   | LessEql
@@ -58,7 +58,7 @@ data Var = Var
 
 type LizPos = (Pos, Pos)
 
-data SExpr = SEIdentifier T.Text
+data SExpr = SEIdentifier LizPos T.Text
   | SELiteral   LizPos T.Text
   | SEComment
   | SEFunc      Func
@@ -75,7 +75,7 @@ data SExpr = SEIdentifier T.Text
 
 --TODO: change this to an actual pretty print, using show messes with ghci shennanigans.
 instance Show SExpr where
-  show (SEIdentifier iden) = show iden
+  show (SEIdentifier _ iden) = show iden
   show (SELiteral (_) lit) = printf "%v" lit
   show (SEUnary (line, col) op r) = printf "%v:%v %v %v" (unPos line) (unPos col) (show op) (show r)
   show (SEBinary (line, col) op l r) = printf "%v:%v %v %v %v" (unPos line) (unPos col) (show l) (show op) (show r)

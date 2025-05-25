@@ -20,7 +20,7 @@ executable liz
     import:           warnings
     main-is:          Main.hs
     other-modules:    Liz.Parser, Liz.Common.Types, Liz.Common.Error, Liz.Sema
-    other-extensions: OverloadedStrings, NamedDefaults
+    other-extensions: OverloadedStrings, NamedDefaults, RecordWildCards, NamedFieldPuns
     build-depends:    base ^>=4.21.0.0, megaparsec >= 9.6.0, text >= 2.1, containers >= 0.5.9
     hs-source-dirs:   app
     default-language: GHC2024

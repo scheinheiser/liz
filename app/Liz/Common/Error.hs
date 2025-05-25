@@ -6,15 +6,19 @@ module Liz.Common.Error (PError (..), SemErr (..)) where
 
 import qualified Data.Text as T
 
-import Liz.Common.Types (LizPos)
+import Liz.Common.Types
 import Text.Printf (printf)
 import Text.Megaparsec
 
-data SemErr = MismatchedTypes LizPos T.Text
-  | IncorrectType LizPos T.Text
+data SemErr = MismatchedTypes LizPos Type T.Text -- expected type ; given type
+  | IncorrectType LizPos Type Type -- expected type ; given type
+  | IncorrectTypes LizPos T.Text [Type] -- expected types ; given type
   | FailedLitInference LizPos T.Text
   | UndefinedIdentifier LizPos T.Text
-  deriving (Show, Eq, Ord)
+  | IdentifierAlreadyInUse LizPos T.Text
+  | AssigningToConstant LizPos T.Text
+  | AssigningToFunction LizPos T.Text
+  deriving (Show, Eq)
 
 data PError = FailedTypeInference T.Text
   | ReservedIdent T.Text

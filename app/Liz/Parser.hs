@@ -60,7 +60,7 @@ parseValue = choice [parseStr, parseChar, parseNum, parseBool, parseUndefined, p
 parseNested :: Parser SExpr
 parseNested = do
   p <- getCurrentPos
-  choice [SELiteral p <$> parseValue, SEIdentifier <$> parseIdent, parseSExpr]
+  choice [SELiteral p <$> parseValue, SEIdentifier p <$> parseIdent, parseSExpr]
 
 -- main parsing functions
 parseIdent :: Parser T.Text
@@ -215,7 +215,7 @@ parseBinary = do
       SEBinary p Divide <$ string "/" <|> 
       SEBinary p GreaterEql <$ string ">=" <|> 
       SEBinary p LessEql <$ string "<=" <|> 
-      SEBinary p Equal <$ string "==" <|> 
+      SEBinary p Eql <$ string "==" <|> 
       SEBinary p NotEql <$ string "!=" <|>
       SEBinary p Greater <$ string ">" <|> 
       SEBinary p Less <$ string "<"

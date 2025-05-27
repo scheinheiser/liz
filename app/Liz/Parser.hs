@@ -43,7 +43,7 @@ lizReserved :: [T.Text]
 lizReserved = 
   [ "var", "set", "const", "if", "func", "return", "False",
     "True", "undefined", "not", "negate", "Int", "Float", 
-    "String", "Char", "Bool", "print" ]
+    "String", "Char", "Bool", "Unit", "print" ]
 
 parseType :: Parser Type
 parseType =

@@ -39,10 +39,11 @@ test-suite liz-test
     import:           warnings
     default-language: GHC2024
     other-modules: Liz.Parser
+      , Liz.ParserSpec
+      , Liz.Sema
+      , Liz.SemaSpec
       , Liz.Common.Error
       , Liz.Common.Types
-      , Liz.ParserSpec
-      , Liz.SemaSpec
     other-extensions: OverloadedStrings, MultilineStrings
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test, app
@@ -52,4 +53,5 @@ test-suite liz-test
       , hspec-megaparsec >= 2.0.0
       , megaparsec >= 9.6.0
       , text >= 2.1
+      , containers >= 0.5.9
     build-tool-depends: hspec-discover:hspec-discover == 2.*

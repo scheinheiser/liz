@@ -97,20 +97,6 @@ spec = do
         })
 
       it "parse a variable and infer its type" $ do
-        parse P.parseSExpr "" "(var four 4)" `shouldParse` (L.SEVar base L.Var{
-          varIdent = "four",
-          varType = L.Int',
-          varValue = L.SELiteral (mkPos 1, mkPos 11) "4"
-        })
-
-      it "parse a constant with explicit typing" $ do
-        parse P.parseSExpr "" "(const tau Float 6.283185)" `shouldParse` (L.SEConst base L.Var{
-          varIdent = "tau",
-          varType = L.Float',
-          varValue = L.SELiteral (mkPos 1, mkPos 18) "6.283185"
-        })
-
-      it "parse a constant and infer its type" $ do
         parse P.parseSExpr "" "(const pi 3.141592)" `shouldParse` (L.SEConst base L.Var{
           varIdent = "pi",
           varType = L.Float',
@@ -128,7 +114,7 @@ spec = do
         parse P.parseSExpr "" `shouldFailOn` "(var hello_world (+ 5 6))" 
 
       it "parse an undefined variable declaration and infer its type (should fail)" $ do
-        parse P.parseSExpr "" `shouldFailOn` "(var this_wont_work undefined)"
+        parse P.parseSExpr "" `shouldFailOn` "(const this_wont_work undefined)"
 
   describe "Function parsing" $ do
     describe "Function declarations" $ do

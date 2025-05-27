@@ -16,7 +16,7 @@ data SymbolTbl = SymbolTbl
   { symFuncMap  :: M.Map T.Text L.Func
   , symVarMap   :: M.Map T.Text L.Var
   , symConstMap :: M.Map T.Text L.Var
-  }
+  } deriving (Show, Eq)
 
 mkSymTbl :: SymbolTbl
 mkSymTbl = SymbolTbl {symFuncMap = M.empty, symVarMap = M.empty, symConstMap = M.empty}
@@ -119,7 +119,12 @@ inferBinary p op l r tbl =
     aux L.Concat lt rt = Left $ [E.IncorrectTypes p "String"  [lt, rt]]
 
     aux (L.Add; L.Subtract; L.Multiply; L.Divide) L.Int' L.Int' = Right L.Int'
+    aux (L.Add; L.Subtract; L.Multiply; L.Divide) lt L.Int' = Left [E.IncorrectType p L.Int' lt]
+    aux (L.Add; L.Subtract; L.Multiply; L.Divide) L.Int' rt = Left [E.IncorrectType p L.Int' rt]
+
     aux (L.Add; L.Subtract; L.Multiply; L.Divide) L.Float' L.Float' = Right L.Float'
+    aux (L.Add; L.Subtract; L.Multiply; L.Divide) lt L.Float' = Left [E.IncorrectType p L.Float' lt]
+    aux (L.Add; L.Subtract; L.Multiply; L.Divide) L.Float' rt = Left [E.IncorrectType p L.Float' rt]
     aux (L.Add; L.Subtract; L.Multiply; L.Divide) lt rt = Left $ [E.IncorrectTypes p "Float or Int" [lt, rt]]
 
     aux (L.Less; L.Greater; L.Eql; L.NotEql; L.GreaterEql; L.LessEql) lt rt
@@ -133,7 +138,7 @@ inferVariable p var@L.Var{..} tbl isConst =
     (Right ty, ntbl) -> aux varIdent varType ty ntbl
   where
     aux :: T.Text -> L.Type -> L.Type -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
-    aux ident valType decType t@(SymbolTbl {symVarMap=varMap, symConstMap=constMap, symFuncMap=funcMap})
+    aux ident decType valType t@(SymbolTbl {symVarMap=varMap, symConstMap=constMap, symFuncMap=funcMap})
       | ident `M.member` varMap || ident `M.member` constMap || ident `M.member` funcMap = (Left $ [E.IdentifierAlreadyInUse p ident], tbl)
       | valType /= decType = (Left $ [E.MismatchedTypes p decType (T.pack $ show valType)], tbl)
       | isConst =

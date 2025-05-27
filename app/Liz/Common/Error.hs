@@ -15,9 +15,15 @@ data SemErr = MismatchedTypes LizPos Type T.Text -- expected type ; given type
   | IncorrectTypes LizPos T.Text [Type] -- expected types ; given type
   | FailedLitInference LizPos T.Text
   | UndefinedIdentifier LizPos T.Text
+  | UndefinedFunction LizPos T.Text
   | IdentifierAlreadyInUse LizPos T.Text
   | AssigningToConstant LizPos T.Text
   | AssigningToFunction LizPos T.Text
+  | NotAFunction LizPos T.Text
+  | NotEnoughArgs LizPos T.Text
+  | TooManyArgs LizPos T.Text
+  | IncorrectArgTypes LizPos T.Text [Type]
+  | NotImplemented SExpr
   deriving (Show, Eq)
 
 data PError = FailedTypeInference T.Text

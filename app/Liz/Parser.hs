@@ -304,6 +304,3 @@ parseAndPP f = do
   case (parse parseProgram f fc) of
     (Left err) -> putStrLn $ errorBundlePretty err
     (Right v) -> putStrLn $ foldMap show v
-
-someFunc :: IO ()
-someFunc = putStrLn "this is someFunc from Liz/Parser.hs"

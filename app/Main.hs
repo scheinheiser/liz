@@ -3,7 +3,7 @@
 
 module Main where
 
-import Liz.Parser
+-- import Liz.Parser
 -- import Data.String ( IsString (..))
 -- import qualified Data.Text as T
 -- import Control.Monad (void)
@@ -13,4 +13,4 @@ import Liz.Parser
 -- import Data.Void (Void)
 
 main :: IO ()
-main = someFunc
+main = putStrLn "hello world"

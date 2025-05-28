@@ -10,6 +10,8 @@ import qualified Liz.Common.Types as L
 import qualified Data.Map as M
 import qualified Data.Text as T
 
+import Error.Diagnose
+
 import Data.Char (isDigit)
 
 data SymbolTbl = SymbolTbl 
@@ -38,9 +40,6 @@ addVar v@(L.Var {varIdent=ident}) tbl@(SymbolTbl {symVarMap=vtbl}) = tbl {symVar
 addConst :: L.Var -> SymbolTbl -> SymbolTbl
 addConst c@(L.Var {varIdent=ident}) tbl@(SymbolTbl {symConstMap=ctbl}) = tbl {symConstMap = M.insert ident c ctbl}
 
--- analyseProgram :: P.Program -> Either E.SemErr P.Program
--- analyseProgram (P.Program prog) = map infer prog
-
 -- helper sema functions
 collectErrors :: [Either [E.SemErr] L.Type] -> [E.SemErr] -> [L.Type] -> ([E.SemErr], [L.Type])
 collectErrors [] errs types = (errs, types)
@@ -50,6 +49,52 @@ collectErrors (x : xs) errs types =
     Right t -> collectErrors xs errs (t : types)
 
 -- main sema functions
+
+-- temp testing function
+testing :: L.Program -> FilePath -> IO ()
+testing p@(L.Program prog) f = do
+  let
+    (nprog, ptbl) = populateWithTopLvlDecls prog mkSymTbl []
+    res = aux nprog ptbl
+    (errs, _) = collectErrors res [] []
+  r <- readFile f
+  let df = addFile def f r
+  if length errs /= 0 
+  then E.printErrs errs df f
+  else putStrLn "all good"
+  where
+    aux :: [L.SExpr] -> SymbolTbl -> [Either [E.SemErr] L.Type]
+    aux [] _ = []
+    aux (ex : exprs) sym =
+      let
+        (res, next) = infer ex sym
+      in res : aux exprs next
+
+analyseProgram :: L.Program -> Either [E.SemErr] L.Program
+analyseProgram p@(L.Program prog) = 
+  let
+    (nprog, ptbl) = populateWithTopLvlDecls prog mkSymTbl []
+    res = aux nprog ptbl
+    (errs, _) = collectErrors res [] []
+  in
+  if length errs /= 0 
+  then Left errs
+  else Right p 
+  where
+    aux :: [L.SExpr] -> SymbolTbl -> [Either [E.SemErr] L.Type]
+    aux [] _ = []
+    aux (ex : exprs) sym =
+      let
+        (res, next) = infer ex sym
+      in res : aux exprs next
+
+populateWithTopLvlDecls :: [L.SExpr] -> SymbolTbl -> [L.SExpr] -> ([L.SExpr], SymbolTbl)
+populateWithTopLvlDecls [] tbl acc = (acc, tbl)
+populateWithTopLvlDecls ((L.SEFunc f) : exprs) tbl acc = populateWithTopLvlDecls exprs (addFunc f tbl) acc
+populateWithTopLvlDecls ((L.SEConst _ _ c) : exprs) tbl acc = populateWithTopLvlDecls exprs (addConst c tbl) acc
+populateWithTopLvlDecls ((L.SEVar _ _ v) : exprs) tbl acc = populateWithTopLvlDecls exprs (addConst v tbl) acc
+populateWithTopLvlDecls (ex : exprs) tbl acc = populateWithTopLvlDecls exprs tbl (ex : acc)
+
 infer :: L.SExpr -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
 infer (L.SEIdentifier iden s e) tbl = inferIdentifier s e iden tbl
 infer (L.SELiteral lit s e) tbl = (inferLiteral s e lit, tbl)
@@ -62,7 +107,7 @@ infer (L.SEReturn _ _ v) tbl = infer v tbl
 infer (L.SEPrint _ _ v) tbl = infer v tbl
 infer (L.SEFunc f) tbl = inferFunc f tbl
 infer (L.SEFuncCall s e iden args) tbl = inferFuncCall s e iden args tbl
-infer L.SEComment tbl = undefined
+infer L.SEComment tbl = (Right L.String', tbl)
 infer s tbl = (Left [E.NotImplemented s], tbl)
 
 inferIdentifier :: L.LizPos -> L.LizPos -> T.Text -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
@@ -92,6 +137,7 @@ inferLiteral s e v
   | (T.take 1 v) == "\"" && (T.last v) == '"' = pure L.String'
   | v == "True" || v == "False" = pure L.Bool'
   | v == "()" = pure L.Unit'
+  | v == "undefined" = pure L.Undef'
   | otherwise = Left $ [E.FailedLitInference s e v]
   where
     removeDigits :: T.Text -> Int
@@ -149,7 +195,7 @@ inferVariable s e var@L.Var{..} tbl isConst =
     aux :: T.Text -> L.Type -> L.Type -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
     aux ident decType valType t@(SymbolTbl {symVarMap=varMap, symConstMap=constMap, symFuncMap=funcMap})
       | ident `M.member` varMap || ident `M.member` constMap || ident `M.member` funcMap = (Left $ [E.IdentifierAlreadyInUse s e ident], tbl)
-      | valType /= decType = (Left $ [E.MismatchedTypes s e decType (T.pack $ show valType)], tbl)
+      | valType /= decType && valType /= L.Undef' = (Left $ [E.MismatchedTypes s e decType (T.pack $ show valType)], tbl)
       | isConst =
         let newTbl = M.insert ident var constMap in
         (Right decType, t{symConstMap=newTbl})
@@ -206,7 +252,7 @@ inferFunc f@(L.Func{..}) tbl@(SymbolTbl{..})
 
 inferFuncCall :: L.LizPos -> L.LizPos -> T.Text -> [L.SExpr] -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
 inferFuncCall s e ident sexprs tbl@(SymbolTbl{..})
-  | ident `M.notMember` symFuncMap || ident `M.member` symConstMap || ident `M.member` symVarMap = (Left $ [E.NotAFunction s e ident], tbl)
+  | ident `M.notMember` symFuncMap || ident `M.member` symConstMap || ident `M.member` symVarMap = (Left $ [E.UndefinedFunction s e ident], tbl)
   | otherwise =
     let value = ident `M.lookup` symFuncMap in
     case value of
@@ -223,12 +269,12 @@ inferFuncCall s e ident sexprs tbl@(SymbolTbl{..})
   where
     aux :: [L.Type] -> [L.Type] -> L.Type -> (Either [E.SemErr] L.Type, SymbolTbl)
     aux ts as ret 
-      | length ts > length as = (Left $ [E.TooManyArgs s e ident], tbl)
-      | length ts < length as = (Left $ [E.NotEnoughArgs s e ident], tbl) 
+      | length ts > length as = (Left $ [E.TooManyArgs s e ident (length ts - length as)], tbl)
+      | length ts < length as = (Left $ [E.NotEnoughArgs s e ident (length as - length ts)], tbl) 
       | otherwise =
         let wts = notInBoth ts as in
         if length wts /= 0 
-        then (Left $ [E.IncorrectArgTypes s e ident wts], tbl)
+        then (Left $ [E.IncorrectArgTypes s e ident as wts], tbl)
         else (Right ret, tbl)
 
     notInBoth :: [L.Type] -> [L.Type] -> [L.Type]

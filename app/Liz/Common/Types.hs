@@ -12,7 +12,17 @@ data Type = Int'
   | Char'
   | Bool'
   | Unit'
-  deriving (Show, Eq)
+  | Undef'
+  deriving (Eq)
+
+instance Show Type where
+  show Int' = "Int"
+  show Float' = "Float"
+  show String' = "String"
+  show Char' = "Char"
+  show Bool' = "Bool"
+  show Unit' = "Unit"
+  show Undef' = "Undefined"
 
 data BinaryOp = Add
   | Subtract
@@ -52,6 +62,9 @@ data Var = Var
   } deriving (Show, Eq)
 
 type LizPos = (Pos, Pos)
+
+newtype Program = Program [SExpr]
+  deriving (Show, Eq)
 
 -- TODO: make a pretty printing function for this.
 data SExpr = SEIdentifier T.Text LizPos LizPos

@@ -19,9 +19,6 @@ import qualified Text.Megaparsec.Char.Lexer as L
 default IsString (T.Text)
 type Parser = Parsec E.PError T.Text
 
-newtype Program = Program [SExpr]
-  deriving (Show, Eq)
-
 -- helper error functions
 failedTypeInference :: T.Text -> Parser a
 failedTypeInference = customFailure . E.FailedTypeInference

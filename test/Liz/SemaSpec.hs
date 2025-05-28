@@ -144,7 +144,7 @@ spec = do
         it "Operands aren't the same type" $ do
           let parsed = parse P.parseNested "" "(>= 5 'h')"
           let output = getOutput parsed
-          (S.infer output S.mkSymTbl) `shouldBe` (Left [E.MismatchedTypes base (mkPos 1, mkPos 10) L.Int' "Char'"], S.mkSymTbl)
+          (S.infer output S.mkSymTbl) `shouldBe` (Left [E.MismatchedTypes base (mkPos 1, mkPos 10) L.Int' "Char"], S.mkSymTbl)
 
       it "Check a nested expression" $ do
         let parsed = parse P.parseNested "" "(== (> 4 5) (not True))"
@@ -161,7 +161,7 @@ spec = do
       it "Fail checking an explicitly-typed variable due to the literal-declaration type mismatch" $ do
         let parsed = parse P.parseNested "" "(var hello_world String 50)"
         let output = getOutput parsed
-        (S.infer output S.mkSymTbl) `shouldBe` (Left [E.MismatchedTypes base (mkPos 1, mkPos 27) L.String' "Int'"], S.mkSymTbl)
+        (S.infer output S.mkSymTbl) `shouldBe` (Left [E.MismatchedTypes base (mkPos 1, mkPos 27) L.String' "Int"], S.mkSymTbl)
 
       it "Check an inferred variable declaration" $ do
         let parsed = parse P.parseNested "" "(const unit ())"

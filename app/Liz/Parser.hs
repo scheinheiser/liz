@@ -59,8 +59,12 @@ parseValue = choice [parseStr, parseChar, parseNum, parseBool, parseUndefined, p
 
 parseNested :: Parser SExpr
 parseNested = do
-  p <- getCurrentPos
-  choice [SELiteral p <$> parseValue, SEIdentifier p <$> parseIdent, parseSExpr]
+  s <- getCurrentPos
+  v <- (do
+    y <- (SELiteral <$> parseValue) <|> (SEIdentifier <$> parseIdent)
+    e <- getCurrentPos
+    pure $ y s e) <|> parseSExpr
+  pure v
 
 -- main parsing functions
 parseIdent :: Parser T.Text
@@ -110,19 +114,21 @@ parseBool = string "True" <|> string "False"
 
 parsePrint :: Parser SExpr
 parsePrint = do
-  p <- getCurrentPos
+  s <- getCurrentPos
   _ <- string "print"
   hspace1
   v <- parseNested
-  pure $ SEPrint p v
+  e <- getCurrentPos
+  pure $ SEPrint s e v
 
 parseRet :: Parser SExpr
 parseRet = do
-  p <- getCurrentPos
+  s <- getCurrentPos
   _ <- string "return"
   hspace1
   v <- parseNested
-  pure $ SEReturn p v
+  e <- getCurrentPos
+  pure $ SEReturn s e v
 
 parseComment :: Parser SExpr
 parseComment = do
@@ -137,11 +143,11 @@ parseComment = do
     (var not_allowed (+ 5 6))
                       ^ For now, you can't declare a variable with inferred type using a nested statement.
                         Maybe I'll add support later on.
-    -}
+-}
 parseVarDecl :: Parser SExpr
 parseVarDecl = do
-  p <- getCurrentPos
-  decType <- SEVar p <$ string "var" <|> SEConst p <$ string "const"
+  s <- getCurrentPos
+  decType <- SEVar s <$ string "var" <|> SEConst s <$ string "const"
   hspace1
   ident <- parseIdent
   hspace1 
@@ -151,10 +157,12 @@ parseVarDecl = do
     aux decl iden (SEType ty) = do
       hspace1
       value <- parseNested
-      pure $ decl Var{varIdent=iden, varType=ty, varValue=value}
-    aux decl iden lit@(SELiteral _ literal) = do
+      e <- getCurrentPos
+      pure $ decl e Var{varIdent=iden, varType=ty, varValue=value}
+    aux decl iden lit@(SELiteral literal _ _) = do
       ty <- inferType literal
-      pure $ decl Var{varIdent=iden, varType=ty, varValue=lit}
+      e <- getCurrentPos
+      pure $ decl e Var{varIdent=iden, varType=ty, varValue=lit}
     aux _ _ op = unsupportedDeclaration $ T.show op
 
     inferType :: T.Text -> Parser Type
@@ -179,46 +187,49 @@ parseVarDecl = do
 
 parseSetStmt :: Parser SExpr
 parseSetStmt = do
-  p <- getCurrentPos
+  s <- getCurrentPos
   _ <- string "set"
   hspace1
   ident <- parseIdent
   hspace1
   value <- parseNested
-  pure $ SESet p ident value
+  e <- getCurrentPos
+  pure $ SESet s e ident value
 
 parseUnary :: Parser SExpr
 parseUnary = do
-  p <- getCurrentPos
-  op <- parseUnaryOp p
+  s <- getCurrentPos
+  op <- parseUnaryOp
   hspace1
   v <- parseNested
-  pure $ op v
+  e <- getCurrentPos
+  pure $ op s e v
   where
-  parseUnaryOp p = SEUnary p Not <$ string "not" <|> SEUnary p Negate <$ string "negate"
+  parseUnaryOp = SEUnary Not <$ string "not" <|> SEUnary Negate <$ string "negate"
 
 parseBinary :: Parser SExpr
 parseBinary = do
-  p <- getCurrentPos
-  op <- parseBinaryOp p
+  s <- getCurrentPos
+  op <- parseBinaryOp
   hspace1
   left <- parseNested
   hspace1
   right <- parseNested
-  pure $ op left right
+  e <- getCurrentPos
+  pure $ op s e left right
   where
-    parseBinaryOp p = 
-      SEBinary p Concat <$ string "++" <|>
-      SEBinary p Add <$ string "+" <|> 
-      SEBinary p Subtract <$ string "-" <|> 
-      SEBinary p Multiply <$ string "*" <|> 
-      SEBinary p Divide <$ string "/" <|> 
-      SEBinary p GreaterEql <$ string ">=" <|> 
-      SEBinary p LessEql <$ string "<=" <|> 
-      SEBinary p Eql <$ string "==" <|> 
-      SEBinary p NotEql <$ string "!=" <|>
-      SEBinary p Greater <$ string ">" <|> 
-      SEBinary p Less <$ string "<"
+    parseBinaryOp = 
+      SEBinary Concat <$ string "++" <|>
+      SEBinary Add <$ string "+" <|> 
+      SEBinary Subtract <$ string "-" <|> 
+      SEBinary Multiply <$ string "*" <|> 
+      SEBinary Divide <$ string "/" <|> 
+      SEBinary GreaterEql <$ string ">=" <|> 
+      SEBinary LessEql <$ string "<=" <|> 
+      SEBinary Eql <$ string "==" <|> 
+      SEBinary NotEql <$ string "!=" <|>
+      SEBinary Greater <$ string ">" <|> 
+      SEBinary Less <$ string "<"
 
 {-
   (func *ident* *args* *return type* *body*)
@@ -232,7 +243,7 @@ parseBinary = do
 -}
 parseFuncDecl :: Parser SExpr
 parseFuncDecl = do
-   p <- getCurrentPos
+   s <- getCurrentPos
    _ <- string "func"
    hspace1
    ident <- parseIdent
@@ -244,7 +255,8 @@ parseFuncDecl = do
    retTy <- parseType
 
    block <- some $ L.lineFold scn $ \_ -> parseSExpr
-   pure $ SEFunc Func {funcIdent = ident, funcPos = p, funcArgs = args, funcReturnType = retTy, funcBody = block}
+   e <- getCurrentPos
+   pure $ SEFunc Func {funcIdent = ident, funcStart = s, funcEnd = e, funcArgs = args, funcReturnType = retTy, funcBody = block}
    where
      scn :: Parser ()
      scn = L.space space1 (void $ spaceChar <|> tab) empty
@@ -264,11 +276,12 @@ parseFuncDecl = do
 
 parseFuncCall :: Parser SExpr
 parseFuncCall = do
-  p <- getCurrentPos
+  s <- getCurrentPos
   ident <- parseIdent
   hspace1
   args <- parseCallArgs
-  pure $ SEFuncCall p ident args
+  e <- getCurrentPos
+  pure $ SEFuncCall s e ident args
   where
     parseCallArgs :: Parser [SExpr]
     parseCallArgs = parseNested `sepBy` char ' '
@@ -290,7 +303,7 @@ parseProgram :: Parser [SExpr]
 parseProgram = some $ try $ scn >> parseSExpr
   where
     scn :: Parser ()
-    scn = L.space space1 (L.skipLineComment ";") empty
+    scn = L.space space1 empty empty
 
 parseFile :: FilePath -> T.Text -> Either (ParseErrorBundle T.Text E.PError) Program
 parseFile f fc = do

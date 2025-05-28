@@ -4,9 +4,6 @@
 module Liz.Common.Types where
 
 import qualified Data.Text as T
-
--- import Text.Printf (printf)
--- import Data.List (intercalate)
 import Text.Megaparsec (Pos)
 
 data Type = Int'
@@ -41,7 +38,8 @@ data Arg = Arg
 
 data Func = Func 
   { funcIdent       :: T.Text
-  , funcPos         :: LizPos
+  , funcStart       :: LizPos
+  , funcEnd         :: LizPos
   , funcArgs        :: [Arg]
   , funcReturnType  :: Type
   , funcBody        :: [SExpr]
@@ -56,17 +54,17 @@ data Var = Var
 type LizPos = (Pos, Pos)
 
 -- TODO: make a pretty printing function for this.
-data SExpr = SEIdentifier LizPos T.Text
-  | SELiteral   LizPos T.Text
+data SExpr = SEIdentifier T.Text LizPos LizPos
+  | SELiteral   T.Text LizPos LizPos
   | SEComment
   | SEFunc      Func
-  | SEFuncCall  LizPos T.Text [SExpr] -- ident - values
-  | SEReturn    LizPos SExpr
-  | SEPrint     LizPos SExpr
+  | SEFuncCall  LizPos LizPos T.Text [SExpr] -- ident - values
+  | SEReturn    LizPos LizPos SExpr
+  | SEPrint     LizPos LizPos SExpr
   | SEType      Type
-  | SEVar       LizPos Var
-  | SEConst     LizPos Var
-  | SESet       LizPos T.Text SExpr -- ident - value
-  | SEBinary    LizPos BinaryOp SExpr SExpr
-  | SEUnary     LizPos UnaryOp SExpr
+  | SEVar       LizPos LizPos Var
+  | SEConst     LizPos LizPos Var
+  | SESet       LizPos LizPos T.Text SExpr -- ident - value
+  | SEBinary    BinaryOp LizPos LizPos SExpr SExpr
+  | SEUnary     UnaryOp LizPos LizPos SExpr
   deriving (Show, Eq)

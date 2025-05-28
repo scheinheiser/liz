@@ -7,11 +7,11 @@
 
 ## Semantic Analysis
 - [ ] Check that there's a `main` func, check that variables outside have the global tag? Up for change, really.
-- [ ] Variable checking (undeclared, using `undefined`, etc).
+- [x] Variable checking (undeclared, using `undefined`, etc).
 - [x] Function checking (returned value matches return type, etc).
 - [x] Function calls (arg checking, correct no. of args).
 - [x] Type checking.
-- [ ] Pretty errors.
+- [x] Pretty errors.
 - [ ] Tests for everything
 
 ## Codegen

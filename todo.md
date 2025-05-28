@@ -8,9 +8,11 @@
 ## Semantic Analysis
 - [ ] Check that there's a `main` func, check that variables outside have the global tag? Up for change, really.
 - [ ] Variable checking (undeclared, using `undefined`, etc).
-- [ ] Function checking (returned value matches return type, etc).
-- [ ] Function calls (arg checking, correct no. of args).
-- [ ] Type checking.
+- [x] Function checking (returned value matches return type, etc).
+- [x] Function calls (arg checking, correct no. of args).
+- [x] Type checking.
+- [ ] Pretty errors.
+- [ ] Tests for everything
 
 ## Codegen
-- [ ] Decide between using LLVM or asm for IR.
+- [x] Decide between using LLVM or asm for IR. (using LLVM baby)

@@ -10,7 +10,7 @@ import qualified Liz.Common.Types as L
 import qualified Data.Map as M
 import qualified Data.Text as T
 
-import Error.Diagnose
+import qualified Error.Diagnose as D
 
 import Data.Char (isDigit)
 
@@ -52,16 +52,16 @@ collectErrors (x : xs) errs types =
 
 -- temp testing function
 testing :: L.Program -> FilePath -> IO ()
-testing p@(L.Program prog) f = do
+testing (L.Program prog) f = do
   let
-    (nprog, ptbl) = populateWithTopLvlDecls prog mkSymTbl []
+    (nprog, ptbl) = populateTopLvl prog mkSymTbl []
     res = aux nprog ptbl
     (errs, _) = collectErrors res [] []
+  putStrLn $ show ptbl
   r <- readFile f
-  let df = addFile def f r
-  if length errs /= 0 
-  then E.printErrs errs df f
-  else putStrLn "all good"
+  let df = D.addFile D.def f r
+  if length errs /= 0 then E.printErrs errs df f
+                      else putStrLn "all good"
   where
     aux :: [L.SExpr] -> SymbolTbl -> [Either [E.SemErr] L.Type]
     aux [] _ = []
@@ -73,13 +73,11 @@ testing p@(L.Program prog) f = do
 analyseProgram :: L.Program -> Either [E.SemErr] L.Program
 analyseProgram p@(L.Program prog) = 
   let
-    (nprog, ptbl) = populateWithTopLvlDecls prog mkSymTbl []
-    res = aux nprog ptbl
+    -- (nprog, ptbl) = populateTopLvl prog mkSymTbl []
+    res = aux prog mkSymTbl
     (errs, _) = collectErrors res [] []
-  in
-  if length errs /= 0 
-  then Left errs
-  else Right p 
+  in if length errs /= 0 then Left errs
+                         else Right p 
   where
     aux :: [L.SExpr] -> SymbolTbl -> [Either [E.SemErr] L.Type]
     aux [] _ = []
@@ -88,12 +86,12 @@ analyseProgram p@(L.Program prog) =
         (res, next) = infer ex sym
       in res : aux exprs next
 
-populateWithTopLvlDecls :: [L.SExpr] -> SymbolTbl -> [L.SExpr] -> ([L.SExpr], SymbolTbl)
-populateWithTopLvlDecls [] tbl acc = (acc, tbl)
-populateWithTopLvlDecls ((L.SEFunc f) : exprs) tbl acc = populateWithTopLvlDecls exprs (addFunc f tbl) acc
-populateWithTopLvlDecls ((L.SEConst _ _ c) : exprs) tbl acc = populateWithTopLvlDecls exprs (addConst c tbl) acc
-populateWithTopLvlDecls ((L.SEVar _ _ v) : exprs) tbl acc = populateWithTopLvlDecls exprs (addConst v tbl) acc
-populateWithTopLvlDecls (ex : exprs) tbl acc = populateWithTopLvlDecls exprs tbl (ex : acc)
+populateTopLvl :: [L.SExpr] -> SymbolTbl -> [L.SExpr] -> ([L.SExpr], SymbolTbl)
+populateTopLvl [] tbl acc = (acc, tbl)
+populateTopLvl ((L.SEFunc f) : exprs) tbl acc = populateTopLvl exprs (addFunc f tbl) acc
+populateTopLvl ((L.SEConst _ _ c) : exprs) tbl acc = populateTopLvl exprs (addConst c tbl) acc
+populateTopLvl ((L.SEVar _ _ v) : exprs) tbl acc = populateTopLvl exprs (addConst v tbl) acc
+populateTopLvl (ex : exprs) tbl acc = populateTopLvl exprs tbl (ex : acc)
 
 infer :: L.SExpr -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
 infer (L.SEIdentifier iden s e) tbl = inferIdentifier s e iden tbl
@@ -195,13 +193,14 @@ inferVariable s e var@L.Var{..} tbl isConst =
     aux :: T.Text -> L.Type -> L.Type -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
     aux ident decType valType t@(SymbolTbl {symVarMap=varMap, symConstMap=constMap, symFuncMap=funcMap})
       | ident `M.member` varMap || ident `M.member` constMap || ident `M.member` funcMap = (Left $ [E.IdentifierAlreadyInUse s e ident], tbl)
-      | valType /= decType && valType /= L.Undef' = (Left $ [E.MismatchedTypes s e decType (T.pack $ show valType)], tbl)
-      | isConst =
-        let newTbl = M.insert ident var constMap in
-        (Right decType, t{symConstMap=newTbl})
+      | valType /= decType && valType /= L.Undef' = 
+        let newTbl = M.insert ident var -- so that you don't get a bunch of undefined variable errors.
+        in if isConst then (Left $ [E.MismatchedTypes s e decType (T.pack $ show valType)], t{symConstMap=newTbl constMap})
+                      else (Left $ [E.MismatchedTypes s e decType (T.pack $ show valType)], t{symVarMap=newTbl varMap})
       | otherwise = 
-        let newtbl = M.insert ident var varMap in
-        (Right decType, t{symVarMap=newtbl})
+        let newtbl = M.insert ident var 
+        in if isConst then (Right decType, t{symConstMap=newtbl constMap})
+                      else (Right decType, t{symVarMap=newtbl varMap})
 
 inferSet :: L.LizPos -> L.LizPos -> T.Text -> L.SExpr -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
 inferSet s e ident v tbl =
@@ -226,29 +225,39 @@ inferFunc f@(L.Func{..}) tbl@(SymbolTbl{..})
   | otherwise =
     let
       tblWithArgs = flip addArgs tbl $ map (\L.Arg{..} -> L.Var{varIdent=argIdent, varType=argType}) funcArgs
-      (result, ntbl) = evaluateFuncBody funcBody tblWithArgs
+      (result, ntbl, vis, cis, fis) = evaluateFuncBody funcBody tblWithArgs
       errsAndTypes = collectErrors result [] []
-    in aux (map L.argIdent funcArgs) errsAndTypes funcReturnType ntbl
+    in aux (map L.argIdent funcArgs) vis cis fis errsAndTypes funcReturnType ntbl
   where
-    aux :: [T.Text] -> ([E.SemErr], [L.Type]) -> L.Type -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
-    aux argIdents (errs, types) ret table@(SymbolTbl {symConstMap=constMap})
-      | length errs /= 0 = (Left errs, table)
-      | last types /= ret = (Left $ [E.MismatchedTypes funcStart funcEnd ret (T.pack $ show (last types))], table)
-      | otherwise = 
-        let 
-          newConstMap = foldr M.delete constMap argIdents 
-          ntbl = (addFunc f table) {symConstMap=newConstMap}
-        in (Right ret, ntbl)
+    aux argIdents vis cis fis (errs, types) ret table@(SymbolTbl {symConstMap=constMap, symVarMap=varMap, symFuncMap=funcMap}) =
+      let
+          nixConsts = foldl' (flip M.delete) constMap (argIdents ++ cis)
+          nixVars = foldl' (flip M.delete) varMap vis
+          nixFuncs = foldl' (flip M.delete) funcMap fis
+          nixFuncDefsTbl = table{symConstMap=nixConsts, symVarMap=nixVars, symFuncMap=nixFuncs}
+      in 
+      case () of _
+                  | last types /= ret -> (Left $ [E.MismatchedTypes funcStart funcEnd ret (T.pack $ show (last types))], nixFuncDefsTbl)
+                  | length errs /= 0 -> (Left errs, nixFuncDefsTbl)
+                  | otherwise -> 
+                      let newFuncMap = M.insert funcIdent f (nixFuncs)
+                      in (Right ret, nixFuncDefsTbl{symFuncMap=newFuncMap})
 
     addArgs :: [L.Var] -> SymbolTbl -> SymbolTbl
     addArgs [] table = table
     addArgs (x : xs) table = addArgs xs $ addConst x table
 
-    evaluateFuncBody :: [L.SExpr] -> SymbolTbl -> ([Either [E.SemErr] L.Type], SymbolTbl)
-    evaluateFuncBody sexprs t = go sexprs t []
+    evaluateFuncBody :: [L.SExpr] -> SymbolTbl -> ([Either [E.SemErr] L.Type], SymbolTbl, [T.Text], [T.Text], [T.Text])
+    evaluateFuncBody sexprs t = go sexprs t [] [] [] []
       where
-        go [] table acc = (acc, table)
-        go (x : xs) table acc = let (res, nt) = infer x table in go xs nt (res : acc)
+        go [] table acc varIdents constIdents funcIdents = (acc, table, varIdents, constIdents, funcIdents)
+        go (x : xs) table acc varIdents constIdents funcIdents = 
+          let (res, nt) = infer x table 
+          in case x of
+            (L.SEVar _ _ L.Var{varIdent=i}) -> go xs nt (res : acc) (i : varIdents) constIdents funcIdents
+            (L.SEConst _ _ L.Var{varIdent=i}) -> go xs nt (res : acc) varIdents (i : constIdents) funcIdents
+            (L.SEFunc L.Func{funcIdent=i}) -> go xs nt (res : acc) varIdents constIdents (i : funcIdents)
+            _ -> go xs nt (res : acc) varIdents constIdents funcIdents
 
 inferFuncCall :: L.LizPos -> L.LizPos -> T.Text -> [L.SExpr] -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
 inferFuncCall s e ident sexprs tbl@(SymbolTbl{..})

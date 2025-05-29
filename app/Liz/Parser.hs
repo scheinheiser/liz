@@ -10,7 +10,7 @@ import Liz.Common.Types
 
 import Data.String ( IsString (..))
 import Data.Char (isAlphaNum, isDigit, isPrint)
-import Control.Monad (void)
+import Control.Monad (void, liftM)
 
 import Text.Megaparsec hiding (count)
 import Text.Megaparsec.Char
@@ -148,7 +148,7 @@ parseVarDecl = do
   hspace1
   ident <- parseIdent
   hspace1 
-  ty <- (parseType >>= pure . SEType) <|> parseNested
+  ty <- (liftM SEType parseType) <|> parseNested
   aux decType ident ty
   where
     aux decl iden (SEType ty) = do
@@ -310,7 +310,7 @@ parseFile f fc = do
 
 parseAndPP :: FilePath -> IO ()
 parseAndPP f = do
-  fc <- readFile f >>= pure . T.pack
+  fc <- liftM T.pack $ readFile f
   case (parse parseProgram f fc) of
     (Left err) -> putStrLn $ errorBundlePretty err
     (Right v) -> putStrLn $ foldMap show v

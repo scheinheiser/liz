@@ -1,5 +1,5 @@
 ## Parsing
-- [ ] Consider adding dedicated syntax for a global variable (like `!!g` or `global`), or disallow it?.
+- [x] Consider adding dedicated syntax for a global variable (like `!!g` or `global`), or disallow it?. (globals would be top level decls)
 - [x] Parse basic expressions, like `var`, `set`, binary and unary things.
 - [x] Parse nested expressions.
 - [x] Basic type inference.

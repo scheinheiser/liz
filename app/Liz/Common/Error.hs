@@ -25,6 +25,7 @@ data SemErr = MismatchedTypes LizPos LizPos Type T.Text -- expected type ; given
   | NotEnoughArgs LizPos LizPos T.Text Int
   | TooManyArgs LizPos LizPos T.Text Int
   | IncorrectArgTypes LizPos LizPos T.Text [Type] [Type] -- expected types ; given types
+  | EmptyFunction LizPos LizPos T.Text
   | NotImplemented SExpr
   deriving (Show, Eq)
 
@@ -39,7 +40,7 @@ prettifyErr (IncorrectType (sL, sC) (eL, eC) ex got) f =
     mempty
 prettifyErr (IncorrectTypes (sL, sC) (eL, eC) ex got) f =
   let formatted_types = intercalate "," $ map show got in
-  D.err Nothing (T.pack $ printf "Expected a value of types '%s', but got '%s'" (show ex) (show got)) 
+  D.err Nothing (T.pack $ printf "Expected a value of types '%s', but got '%s'" (show ex) formatted_types) 
     [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this expression.")] 
     mempty
 prettifyErr (FailedLitInference (sL, sC) (eL, eC) lit) f =
@@ -80,6 +81,10 @@ prettifyErr (IncorrectArgTypes (sL, sC) (eL, eC) iden r w) f =
     formatted_wts = intercalate "," $ map show w
   in
   D.err Nothing (T.pack $ printf "While calling '%s', expected args of type %s but got %s" iden formatted_rts formatted_wts) 
+    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this identifier")] 
+    mempty
+prettifyErr (EmptyFunction (sL, sC) (eL, eC) iden) f =
+  D.err Nothing (T.pack $ printf "" iden) 
     [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this identifier")] 
     mempty
 

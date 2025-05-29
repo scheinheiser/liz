@@ -6,13 +6,13 @@
 - [x] Parse more complex expressions, like `func` and function calls.
 
 ## Semantic Analysis
-- [ ] Check that there's a `main` func, check that variables outside have the global tag? Up for change, really.
+- [x] Check that there's a `main` func, check that variables outside have the global tag? Up for change, really. (might do this at codegen tbh)
 - [x] Variable checking (undeclared, using `undefined`, etc).
 - [x] Function checking (returned value matches return type, etc).
 - [x] Function calls (arg checking, correct no. of args).
 - [x] Type checking.
 - [x] Pretty errors.
-- [ ] Tests for everything
+- [x] Tests for everything
 
 ## Codegen
 - [x] Decide between using LLVM or asm for IR. (using LLVM baby)

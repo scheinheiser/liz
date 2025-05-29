@@ -13,6 +13,7 @@
 - [x] Type checking.
 - [x] Pretty errors.
 - [x] Tests for everything
+- [ ] Allow declarations in any order.
 
 ## Codegen
 - [x] Decide between using LLVM or asm for IR. (using LLVM baby)

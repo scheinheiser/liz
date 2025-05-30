@@ -22,24 +22,24 @@
 (func do_nothing [] > Unit
  (return ()))
 
-(func main [] > Unit
+;(func main [] > Unit
   ; (var *ident* *optional type* *value*)
-  (var four 4) ; inferred Int
-  (var hello String "World")
+  ;(var four 4) ; inferred Int
+  ;(var hello String "World")
 
-  (var no_value Bool undefined) ; this is treated like 'nil' in other languages.
-  (var forty Int undefined)
+  ;(var no_value Bool undefined) ; this is treated like 'nil' in other languages.
+  ;(var forty Int undefined)
 
   ; (set *declared variable* *new value*)
   ; It must have the same type of the previous value.
-  (set no_value False)
-  (set forty (* four 10))
+  ;(set no_value False)
+  ;(set forty (* four 10))
 
   ; (const *ident* *optional type* value)
-  (const pi 3.141592) ; inferred type
-  (const tau Float 6.283185) ; explicit typing
+  ;(const pi 3.141592) ; inferred type
+  ;(const tau Float 6.283185) ; explicit typing
 
-  (print (== 4 (decrement (increment 4)))) ; would print "True"
-  ; (print with_hello)
-  ; ueouoe
-  (return ()))
+  ;(print (== 4 (decrement (increment 4)))) ; would print "True"
+  ;(print with_hello)
+  ;ueouoe
+  ;(return ()))

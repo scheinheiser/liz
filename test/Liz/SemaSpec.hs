@@ -17,6 +17,22 @@ getOutput (Right x) = x
 base :: (Pos, Pos)
 base = (mkPos 1, mkPos 2)
 
+-- to circumvent the checks for a 'main' function in the sema function.
+analyseProgram :: L.Program -> Either [E.SemErr] L.Program
+analyseProgram p@(L.Program prog) = 
+  let
+    res = aux prog S.mkSymTbl
+    (errs, _) = S.collectErrors res [] []
+  in if length errs /= 0 then Left errs
+                         else Right p 
+  where
+    aux :: [L.SExpr] -> S.SymbolTbl -> [Either [E.SemErr] L.Type]
+    aux [] _ = []
+    aux (ex : exprs) sym =
+      let
+        (res, next) = S.infer ex sym
+      in res : aux exprs next
+
 spec :: Spec
 spec = do
   describe "Type checking" $ do
@@ -281,11 +297,11 @@ spec = do
         let input = """
           (func concat [s1 ~ String, s2 ~ String] > String
           \&  (return (++ s1 s2)))
-          (concat "hello " "world")
-          """
+          (concat "hello " "world")\
+          \"""
         let parsed = P.parseFile "" input
         let output = getOutput parsed
-        (S.analyseProgram output) `shouldBe` (Right $ L.Program [(L.SEFunc L.Func {
+        (analyseProgram output) `shouldBe` (Right $ L.Program [(L.SEFunc L.Func {
             funcIdent="concat",
             funcStart=base,
             funcEnd=(mkPos 2, mkPos 22),
@@ -303,28 +319,28 @@ spec = do
         let input = """
           (func concat [s1 ~ String, s2 ~ String] > String
           \&  (return (++ s1 s2)))
-          (concat "hello " "world" 50 10)
-          """
+          (concat "hello " "world" 50 10)\
+          \"""
         let parsed = P.parseFile "" input
         let output = getOutput parsed
-        (S.analyseProgram output) `shouldBe` (Left [E.TooManyArgs (mkPos 3, mkPos 2) (mkPos 3, mkPos 31) "concat" 2])
+        (analyseProgram output) `shouldBe` (Left [E.TooManyArgs (mkPos 3, mkPos 2) (mkPos 3, mkPos 31) "concat" 2])
 
       it "Fail to check a function call with too little args" $ do
         let input = """
           (func concat [s1 ~ String, s2 ~ String] > String
           \&  (return (++ s1 s2)))
-          (concat "won't work...")
-          """
+          (concat "won't work...")\
+          \"""
         let parsed = P.parseFile "" input
         let output = getOutput parsed
-        (S.analyseProgram output) `shouldBe` (Left [E.NotEnoughArgs (mkPos 3, mkPos 2) (mkPos 3, mkPos 24) "concat" 1])
+        (analyseProgram output) `shouldBe` (Left [E.NotEnoughArgs (mkPos 3, mkPos 2) (mkPos 3, mkPos 24) "concat" 1])
 
       it "Fail to check a function call with incorrect arg types" $ do
         let input = """
           (func concat [s1 ~ String, s2 ~ String] > String
           \&  (return (++ s1 s2)))
-          (concat True False)
-          """
+          (concat True False)\
+          \"""
         let parsed = P.parseFile "" input
         let output = getOutput parsed
-        (S.analyseProgram output) `shouldBe` (Left [E.IncorrectArgTypes (mkPos 3, mkPos 2) (mkPos 3, mkPos 19) "concat" [L.String', L.String'] [L.Bool', L.Bool']])
+        (analyseProgram output) `shouldBe` (Left [E.IncorrectArgTypes (mkPos 3, mkPos 2) (mkPos 3, mkPos 19) "concat" [L.String', L.String'] [L.Bool', L.Bool']])

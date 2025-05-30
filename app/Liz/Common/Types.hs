@@ -66,7 +66,6 @@ type LizPos = (Pos, Pos)
 newtype Program = Program [SExpr]
   deriving (Show, Eq)
 
--- TODO: make a pretty printing function for this.
 data SExpr = SEIdentifier T.Text LizPos LizPos
   | SELiteral   T.Text LizPos LizPos
   | SEComment

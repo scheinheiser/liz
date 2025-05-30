@@ -6,7 +6,7 @@
 - [x] Parse more complex expressions, like `func` and function calls.
 
 ## Semantic Analysis
-- [x] Check that there's a `main` func, check that variables outside have the global tag? Up for change, really. (might do this at codegen tbh)
+- [x] Check that there's a `main` func, check that variables outside have the global tag? Up for change, really. (main checking is implemented)
 - [x] Variable checking (undeclared, using `undefined`, etc).
 - [x] Function checking (returned value matches return type, etc).
 - [x] Function calls (arg checking, correct no. of args).

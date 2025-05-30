@@ -54,44 +54,51 @@ collectErrors (x : xs) errs types =
 testing :: L.Program -> FilePath -> IO ()
 testing (L.Program prog) f = do
   let
-    (nprog, ptbl) = populateTopLvl prog mkSymTbl []
-    res = aux nprog ptbl
+    (res, hasMain) = aux prog mkSymTbl False []
     (errs, _) = collectErrors res [] []
-  putStrLn $ show ptbl
   r <- readFile f
   let df = D.addFile D.def f r
-  if length errs /= 0 then E.printErrs errs df f
-                      else putStrLn "all good"
+  case () of _
+              | length errs /= 0 -> E.printErrs errs df f
+              | not hasMain -> E.printErrs [E.NoEntrypoint] df f
+              | otherwise -> putStrLn "all good"
   where
-    aux :: [L.SExpr] -> SymbolTbl -> [Either [E.SemErr] L.Type]
-    aux [] _ = []
-    aux (ex : exprs) sym =
+    aux :: [L.SExpr] -> SymbolTbl -> Bool -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Bool)
+    aux [] _ hasMain acc = (acc, hasMain)
+    aux (ex@(L.SEFunc L.Func{funcIdent=i}) : exprs) sym hasMain acc =
       let
         (res, next) = infer ex sym
-      in res : aux exprs next
+      in if i == "main" then aux exprs next True (res : acc)
+                        else aux exprs next hasMain (res : acc)
+    aux (ex : exprs) sym hasMain acc =
+      let
+        (res, next) = infer ex sym
+      in aux exprs next hasMain (res : acc)
 
+-- TODO: Allow declarations in any order.
 analyseProgram :: L.Program -> Either [E.SemErr] L.Program
 analyseProgram p@(L.Program prog) = 
   let
-    -- (nprog, ptbl) = populateTopLvl prog mkSymTbl []
-    res = aux prog mkSymTbl
+    (res, hasMain) = aux prog mkSymTbl False []
     (errs, _) = collectErrors res [] []
-  in if length errs /= 0 then Left errs
-                         else Right p 
+  in
+  case () of _
+              | length errs /= 0 && not hasMain -> Left $ E.NoEntrypoint : errs
+              | length errs /= 0 -> Left errs
+              | not hasMain -> Left [E.NoEntrypoint]
+              | otherwise -> Right p
   where
-    aux :: [L.SExpr] -> SymbolTbl -> [Either [E.SemErr] L.Type]
-    aux [] _ = []
-    aux (ex : exprs) sym =
+    aux :: [L.SExpr] -> SymbolTbl -> Bool -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Bool)
+    aux [] _ hasMain acc = (acc, hasMain)
+    aux (ex@(L.SEFunc L.Func{funcIdent=i}) : exprs) sym hasMain acc =
       let
         (res, next) = infer ex sym
-      in res : aux exprs next
-
-populateTopLvl :: [L.SExpr] -> SymbolTbl -> [L.SExpr] -> ([L.SExpr], SymbolTbl)
-populateTopLvl [] tbl acc = (acc, tbl)
-populateTopLvl ((L.SEFunc f) : exprs) tbl acc = populateTopLvl exprs (addFunc f tbl) acc
-populateTopLvl ((L.SEConst _ _ c) : exprs) tbl acc = populateTopLvl exprs (addConst c tbl) acc
-populateTopLvl ((L.SEVar _ _ v) : exprs) tbl acc = populateTopLvl exprs (addConst v tbl) acc
-populateTopLvl (ex : exprs) tbl acc = populateTopLvl exprs tbl (ex : acc)
+      in if i == "main" then aux exprs next True (res : acc)
+                        else aux exprs next hasMain (res : acc)
+    aux (ex : exprs) sym hasMain acc =
+      let
+        (res, next) = infer ex sym
+      in aux exprs next hasMain (res : acc)
 
 infer :: L.SExpr -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
 infer (L.SEIdentifier iden s e) tbl = inferIdentifier s e iden tbl
@@ -231,6 +238,7 @@ inferFunc f@(L.Func{..}) tbl@(SymbolTbl{..})
   where
     aux argIdents vis cis fis (errs, types) ret table@(SymbolTbl {symConstMap=constMap, symVarMap=varMap, symFuncMap=funcMap}) =
       let
+      -- removing anything declared within the function from the table.
           nixConsts = foldl' (flip M.delete) constMap (argIdents ++ cis)
           nixVars = foldl' (flip M.delete) varMap vis
           nixFuncs = foldl' (flip M.delete) funcMap fis
@@ -245,7 +253,7 @@ inferFunc f@(L.Func{..}) tbl@(SymbolTbl{..})
 
     addArgs :: [L.Var] -> SymbolTbl -> SymbolTbl
     addArgs [] table = table
-    addArgs (x : xs) table = addArgs xs $ addConst x table
+    addArgs (x : xs) table = addArgs xs $ addConst x table -- args are constant by default
 
     evaluateFuncBody :: [L.SExpr] -> SymbolTbl -> ([Either [E.SemErr] L.Type], SymbolTbl, [T.Text], [T.Text], [T.Text])
     evaluateFuncBody sexprs t = go sexprs t [] [] [] []
@@ -263,30 +271,26 @@ inferFuncCall :: L.LizPos -> L.LizPos -> T.Text -> [L.SExpr] -> SymbolTbl -> (Ei
 inferFuncCall s e ident sexprs tbl@(SymbolTbl{..})
   | ident `M.notMember` symFuncMap || ident `M.member` symConstMap || ident `M.member` symVarMap = (Left $ [E.UndefinedFunction s e ident], tbl)
   | otherwise =
-    let value = ident `M.lookup` symFuncMap in
-    case value of
+    case (ident `M.lookup` symFuncMap) of
         Nothing -> (Left $ [E.UndefinedIdentifier s e ident], tbl)
         Just (L.Func{funcReturnType=retType, funcArgs=args}) ->
           let 
             evaluated_sexprs = map (fst . flip infer tbl) sexprs 
             argTypes = map L.argType args
             (errs, types) = collectErrors evaluated_sexprs [] []
-          in 
-          if length errs /= 0 
-          then (Left errs, tbl)
-          else aux types argTypes retType
+          in if length errs /= 0 then (Left errs, tbl)
+                                 else aux types argTypes retType
   where
     aux :: [L.Type] -> [L.Type] -> L.Type -> (Either [E.SemErr] L.Type, SymbolTbl)
     aux ts as ret 
       | length ts > length as = (Left $ [E.TooManyArgs s e ident (length ts - length as)], tbl)
       | length ts < length as = (Left $ [E.NotEnoughArgs s e ident (length as - length ts)], tbl) 
       | otherwise =
-        let wts = notInBoth ts as in
-        if length wts /= 0 
-        then (Left $ [E.IncorrectArgTypes s e ident as wts], tbl)
-        else (Right ret, tbl)
+        let wts = findWrongTypes ts as in
+        if length wts /= 0 then (Left $ [E.IncorrectArgTypes s e ident as wts], tbl)
+                           else (Right ret, tbl)
 
-    notInBoth :: [L.Type] -> [L.Type] -> [L.Type]
-    notInBoth [] _ = []
-    notInBoth (x : xs) ys | not $ x `elem` ys = x : notInBoth xs ys
-                          | otherwise = notInBoth xs ys
+    findWrongTypes :: [L.Type] -> [L.Type] -> [L.Type]
+    findWrongTypes [] _ = []
+    findWrongTypes (x : xs) ys | not $ x `elem` ys = x : findWrongTypes xs ys
+                               | otherwise = findWrongTypes xs ys

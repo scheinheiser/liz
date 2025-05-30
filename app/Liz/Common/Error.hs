@@ -25,10 +25,11 @@ data SemErr = MismatchedTypes LizPos LizPos Type T.Text -- expected type ; given
   | NotEnoughArgs LizPos LizPos T.Text Int
   | TooManyArgs LizPos LizPos T.Text Int
   | IncorrectArgTypes LizPos LizPos T.Text [Type] [Type] -- expected types ; given types
-  | EmptyFunction LizPos LizPos T.Text
+  | NoEntrypoint
   | NotImplemented SExpr
   deriving (Show, Eq)
 
+-- TODO: switch to prettyprinter, diagnose isn't as flexible as it.
 prettifyErr :: SemErr -> FilePath -> D.Report T.Text
 prettifyErr (MismatchedTypes (sL, sC) (eL, eC) ex got) f = 
   D.err Nothing (T.pack $ printf "Expected a value of type '%s', but got '%s'" (show ex) got) 
@@ -83,10 +84,10 @@ prettifyErr (IncorrectArgTypes (sL, sC) (eL, eC) iden r w) f =
   D.err Nothing (T.pack $ printf "While calling '%s', expected args of type %s but got %s" iden formatted_rts formatted_wts) 
     [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this identifier")] 
     mempty
-prettifyErr (EmptyFunction (sL, sC) (eL, eC) iden) f =
-  D.err Nothing (T.pack $ printf "" iden) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this identifier")] 
-    mempty
+-- prettifyErr NoEntrypoint f =
+--   D.err Nothing (T.pack $ printf "No entry point found for the program.") 
+--     [(D.Position (1, 1) (1, 1) f, D.This "")] 
+--    ["Consider writing a 'main' function."] 
 
 printErrs :: [SemErr] -> Diagnostic T.Text -> FilePath -> IO ()
 printErrs [] r _ = D.printDiagnostic D.stderr True True 4 D.defaultStyle r

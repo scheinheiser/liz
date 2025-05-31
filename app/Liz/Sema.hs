@@ -10,8 +10,6 @@ import qualified Liz.Common.Types as L
 import qualified Data.Map as M
 import qualified Data.Text as T
 
-import qualified Error.Diagnose as D
-
 import Data.Char (isDigit)
 
 data SymbolTbl = SymbolTbl 
@@ -56,11 +54,10 @@ testing (L.Program prog) f = do
   let
     (res, hasMain) = aux prog mkSymTbl False []
     (errs, _) = collectErrors res [] []
-  r <- readFile f
-  let df = D.addFile D.def f r
   case () of _
-              | length errs /= 0 -> E.printErrs errs df f
-              | not hasMain -> E.printErrs [E.NoEntrypoint] df f
+              | length errs /= 0 && not hasMain -> E.printErrs f (E.NoEntrypoint : errs) []
+              | length errs /= 0 -> E.printErrs f errs []
+              | not hasMain -> E.printErrs f errs []
               | otherwise -> putStrLn "all good"
   where
     aux :: [L.SExpr] -> SymbolTbl -> Bool -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Bool)
@@ -189,7 +186,7 @@ inferBinary s e op l r tbl =
 
     aux (L.Less; L.Greater; L.Eql; L.NotEql; L.GreaterEql; L.LessEql) lt rt
       | lt == rt = Right L.Bool'
-      | otherwise = Left $ [E.MismatchedTypes s e lt (T.pack $ show rt)]
+      | otherwise = Left $ [E.IncorrectType s e lt rt]
 
 inferVariable :: L.LizPos -> L.LizPos -> L.Var -> SymbolTbl -> Bool -> (Either [E.SemErr] L.Type, SymbolTbl)
 inferVariable s e var@L.Var{..} tbl isConst =
@@ -202,8 +199,8 @@ inferVariable s e var@L.Var{..} tbl isConst =
       | ident `M.member` varMap || ident `M.member` constMap || ident `M.member` funcMap = (Left $ [E.IdentifierAlreadyInUse s e ident], tbl)
       | valType /= decType && valType /= L.Undef' = 
         let newTbl = M.insert ident var -- so that you don't get a bunch of undefined variable errors.
-        in if isConst then (Left $ [E.MismatchedTypes s e decType (T.pack $ show valType)], t{symConstMap=newTbl constMap})
-                      else (Left $ [E.MismatchedTypes s e decType (T.pack $ show valType)], t{symVarMap=newTbl varMap})
+        in if isConst then (Left $ [E.IncorrectType s e decType valType], t{symConstMap=newTbl constMap})
+                      else (Left $ [E.IncorrectType s e decType valType], t{symVarMap=newTbl varMap})
       | otherwise = 
         let newtbl = M.insert ident var 
         in if isConst then (Right decType, t{symConstMap=newtbl constMap})
@@ -245,7 +242,7 @@ inferFunc f@(L.Func{..}) tbl@(SymbolTbl{..})
           nixFuncDefsTbl = table{symConstMap=nixConsts, symVarMap=nixVars, symFuncMap=nixFuncs}
       in 
       case () of _
-                  | last types /= ret -> (Left $ [E.MismatchedTypes funcStart funcEnd ret (T.pack $ show (last types))], nixFuncDefsTbl)
+                  | last types /= ret -> (Left $ [E.IncorrectType funcStart funcEnd ret (last types)], nixFuncDefsTbl)
                   | length errs /= 0 -> (Left errs, nixFuncDefsTbl)
                   | otherwise -> 
                       let newFuncMap = M.insert funcIdent f (nixFuncs)
@@ -269,7 +266,7 @@ inferFunc f@(L.Func{..}) tbl@(SymbolTbl{..})
 
 inferFuncCall :: L.LizPos -> L.LizPos -> T.Text -> [L.SExpr] -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
 inferFuncCall s e ident sexprs tbl@(SymbolTbl{..})
-  | ident `M.notMember` symFuncMap || ident `M.member` symConstMap || ident `M.member` symVarMap = (Left $ [E.UndefinedFunction s e ident], tbl)
+  | ident `M.notMember` symFuncMap || ident `M.member` symConstMap || ident `M.member` symVarMap = (Left $ [E.UndefinedIdentifier s e ident], tbl)
   | otherwise =
     case (ident `M.lookup` symFuncMap) of
         Nothing -> (Left $ [E.UndefinedIdentifier s e ident], tbl)

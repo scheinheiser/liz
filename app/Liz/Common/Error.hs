@@ -2,23 +2,20 @@
 {-# LANGUAGE NamedDefaults #-}
 {-# LANGUAGE LambdaCase #-}
 
-module Liz.Common.Error (PError (..), SemErr (..), printErrs) where
+module Liz.Common.Error where
 
 import qualified Data.Text as T
-import Data.List
-import qualified Error.Diagnose as D
-import Error.Diagnose.Diagnostic
+import qualified Text.Colour as C
 
 import Liz.Common.Types
 import Text.Printf (printf)
+import Data.List (intercalate)
 import Text.Megaparsec
 
-data SemErr = MismatchedTypes LizPos LizPos Type T.Text -- expected type ; given type
-  | IncorrectType LizPos LizPos Type Type -- expected type ; given type
+data SemErr = IncorrectType LizPos LizPos Type Type -- expected type ; given type
   | IncorrectTypes LizPos LizPos T.Text [Type] -- expected types ; given type
   | FailedLitInference LizPos LizPos T.Text
   | UndefinedIdentifier LizPos LizPos T.Text
-  | UndefinedFunction LizPos LizPos T.Text
   | IdentifierAlreadyInUse LizPos LizPos T.Text
   | AssigningToConstant LizPos LizPos T.Text
   | AssigningToFunction LizPos LizPos T.Text
@@ -29,72 +26,64 @@ data SemErr = MismatchedTypes LizPos LizPos Type T.Text -- expected type ; given
   | NotImplemented SExpr
   deriving (Show, Eq)
 
--- TODO: switch to prettyprinter, diagnose isn't as flexible as it.
-prettifyErr :: SemErr -> FilePath -> D.Report T.Text
-prettifyErr (MismatchedTypes (sL, sC) (eL, eC) ex got) f = 
-  D.err Nothing (T.pack $ printf "Expected a value of type '%s', but got '%s'" (show ex) got) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this expression.")] 
-    mempty
-prettifyErr (IncorrectType (sL, sC) (eL, eC) ex got) f =
-  D.err Nothing (T.pack $ printf "Expected a value of type '%s', but got '%s'" (show ex) (show got)) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this expression.")] 
-    mempty
-prettifyErr (IncorrectTypes (sL, sC) (eL, eC) ex got) f =
-  let formatted_types = intercalate "," $ map show got in
-  D.err Nothing (T.pack $ printf "Expected a value of types '%s', but got '%s'" (show ex) formatted_types) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this expression.")] 
-    mempty
-prettifyErr (FailedLitInference (sL, sC) (eL, eC) lit) f =
-  D.err Nothing (T.pack $ printf "Failed to infer the type of '%s'" lit) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this literal.")] 
-    mempty
-prettifyErr (UndefinedIdentifier (sL, sC) (eL, eC) iden) f =
-  D.err Nothing (T.pack $ printf "'%s' was not declared within the scope." iden) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this identifier.")] 
-    [T.pack $ printf "Consider defining '%s' globally or within the function." iden]
-prettifyErr (UndefinedFunction (sL, sC) (eL, eC) iden) f =
-  D.err Nothing (T.pack $ printf "'%s' has not been defined in the file." iden) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this identifier.")] 
-    [T.pack $ printf "Consider defining '%s' within the file." iden]
-prettifyErr (IdentifierAlreadyInUse (sL, sC) (eL, eC) iden) f =
-  D.err Nothing (T.pack $ printf "The identifier '%s' is already in use." iden) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this identifier.")] 
-    ["Consider renaming the variable."]
-prettifyErr (AssigningToConstant (sL, sC) (eL, eC) iden) f =
-  D.err Nothing (T.pack $ printf "Cannot assign to constant '%s'." iden) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this identifier.")] 
-    ["Consider defining the variable with 'var' instead of 'const'."]
-prettifyErr (AssigningToFunction (sL, sC) (eL, eC) iden) f =
-  D.err Nothing (T.pack $ printf "Cannot assign to the function '%s'." iden) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this identifier.")] 
-    [T.pack $ printf "Did you mean to define '%s' as a function?" iden]
-prettifyErr (NotEnoughArgs (sL, sC) (eL, eC) iden no) f =
-  D.err Nothing (T.pack $ printf "Not enough args supplied to %s." iden) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this function call.")] 
-    [T.pack $ printf "Missing %s args." no]
-prettifyErr (TooManyArgs (sL, sC) (eL, eC) iden no) f =
-  D.err Nothing (T.pack $ printf "Too many args supplied to '%s'." iden) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this identifier")] 
-    [T.pack $ printf "Supplied an extra %s args." no]
-prettifyErr (IncorrectArgTypes (sL, sC) (eL, eC) iden r w) f =
-  let 
-    formatted_rts = intercalate "," $ map show r
-    formatted_wts = intercalate "," $ map show w
-  in
-  D.err Nothing (T.pack $ printf "While calling '%s', expected args of type %s but got %s" iden formatted_rts formatted_wts) 
-    [(D.Position (unPos sL, unPos sC) (unPos eL, unPos eC) f, D.This "While checking this identifier")] 
-    mempty
--- prettifyErr NoEntrypoint f =
---   D.err Nothing (T.pack $ printf "No entry point found for the program.") 
---     [(D.Position (1, 1) (1, 1) f, D.This "")] 
---    ["Consider writing a 'main' function."] 
-
-printErrs :: [SemErr] -> Diagnostic T.Text -> FilePath -> IO ()
-printErrs [] r _ = D.printDiagnostic D.stderr True True 4 D.defaultStyle r
-printErrs (x : xs) r f = printErrs xs (addErr x r) f
+prettifyErr :: SemErr -> FilePath -> [C.Chunk]
+prettifyErr expr fp =
+  case expr of
+    IncorrectType s e ex got -> (filePrefixWithLoc fp s e) <> errorPrefix <> (errorText $ T.pack $ printf "Expected type '%s', but got '%s'.\n" (show ex) (show got))
+    IncorrectTypes s e ex got -> (filePrefixWithLoc fp s e) <> errorPrefix <> (errorText $ T.pack $ printf "Expected types '%s', but got '%s'.\n" ex (intercalate "," $ map show got))
+    FailedLitInference s e lit -> (filePrefixWithLoc fp s e) <> errorPrefix <> (errorText $ T.pack $ printf "Failed to infer the type of '%s'.\n" lit)
+    UndefinedIdentifier s e i -> (filePrefixWithLoc fp s e) <> errorPrefix <> (errorText $ T.pack $ printf "Undefined identifier '%s'." i) <> (hintText "Consider checking that the value is in scope.\n")
+    IdentifierAlreadyInUse s e i -> (filePrefixWithLoc fp s e) <> errorPrefix <> (errorText $ T.pack $ printf "Identifier '%s' is already in use." i) <> (hintText "Consider giving the identifier a different name.")
+    AssigningToConstant s e i -> (filePrefixWithLoc fp s e) <> errorPrefix <> (errorText $ T.pack $ printf "Attempted to assign to constant '%s'." i) <> (hintText "Consider defining the value with 'var' instead of 'const'.\n")
+    AssigningToFunction s e i -> (filePrefixWithLoc fp s e) <> errorPrefix <> (errorText $ T.pack $ printf "Attempted to assign to the function '%s'." i) <> (hintText $ T.pack $ printf "Did you mean to define '%s' as a function?\n" i)
+    NotEnoughArgs s e i no -> (filePrefixWithLoc fp s e) <> errorPrefix <> (errorText $ T.pack $ printf "Not enough args supplied to '%s'." i) <> (hintText $ T.pack $ printf "Missing %s args.\n" (show no))
+    TooManyArgs s e i no -> (filePrefixWithLoc fp s e) <> errorPrefix <> (errorText $ T.pack $ printf "Too many args supplied to '%s'." i) <> (hintText $ T.pack $ printf "Supplied an extra %s args.\n" (show no))
+    IncorrectArgTypes s e i ex got -> 
+      let
+        formatted_rts = intercalate "," $ map show ex 
+        formatted_wts = intercalate "," $ map show got
+      in (filePrefixWithLoc fp s e) <> errorPrefix <> (errorText $ T.pack $ printf "While calling '%s', expectected args of type %s but got %s.\n" i formatted_rts formatted_wts)
+    NoEntrypoint -> (filePrefixNoLoc fp) <> errorPrefix <> (errorText "Couldn't find entry point.") <> (hintText "Consider adding a 'main' function.\n")
+    NotImplemented s -> (filePrefixNoLoc fp) <> errorPrefix <> (errorText $ T.pack $ printf "SExpression has not been implemented; '%s'.\n" (show s))
   where
-    addErr :: SemErr -> Diagnostic T.Text -> Diagnostic T.Text
-    addErr err d = D.addReport d (prettifyErr err f)
+    filePrefixWithLoc :: FilePath -> LizPos -> LizPos -> [C.Chunk]
+    filePrefixWithLoc f (sL, sC) (eL, eC) = [
+        (C.underline . C.bold . C.fore fpColour) $ C.chunk $ T.pack $ printf "%s@%s:%s-%s:%s\n" f (show $ unPos sL) (show $ unPos sC) (show $ unPos eL) (show $ unPos eC)
+      ]
+      where
+        fpColour :: C.Colour
+        fpColour = C.colourRGB 70 214 17
+
+    filePrefixNoLoc :: FilePath -> [C.Chunk]
+    filePrefixNoLoc f = [(C.underline . C.bold . C.fore fpColour) $ C.chunk $ T.pack $ printf "%s@all\n" f]
+      where
+        fpColour :: C.Colour
+        fpColour = C.colourRGB 70 214 17
+
+    errorPrefix :: [C.Chunk]
+    errorPrefix = [
+        (C.fore errorColour) $ C.chunk "[ERROR]",
+        (C.fore textColour) $ C.chunk " ~ "
+      ]
+
+    errorText :: T.Text -> [C.Chunk]
+    errorText t = [(C.underline . C.bold . C.fore textColour) $ C.chunk (t <> "\n")]
+
+    hintText :: T.Text -> [C.Chunk]
+    hintText t = [C.fore hintColour $ C.chunk "  [HINT] ~ ", C.fore hintColour $ C.chunk (t <> "\n")]
+
+    errorColour :: C.Colour
+    errorColour = C.colourRGB 237 26 33 
+
+    textColour :: C.Colour
+    textColour = C.colourRGB 237 228 228
+
+    hintColour :: C.Colour
+    hintColour = C.colourRGB 217 190 150
+
+printErrs :: FilePath -> [SemErr] -> [C.Chunk] -> IO ()
+printErrs _ [] acc = C.putChunksUtf8With C.With24BitColours acc
+printErrs fp (e : es) acc = printErrs fp es (prettifyErr e fp <> acc)
 
 data PError = FailedTypeInference T.Text
   | ReservedIdent T.Text

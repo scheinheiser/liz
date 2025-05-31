@@ -32,7 +32,7 @@ executable liz
       , megaparsec >= 9.6.0
       , text >= 2.1
       , containers >= 0.5.9
-      , diagnose == 2.*
+      , safe-coloured-text == 0.3.*
     hs-source-dirs:   app
     default-language: GHC2024
 
@@ -54,6 +54,6 @@ test-suite liz-test
       , hspec-megaparsec >= 2.0.0
       , megaparsec >= 9.6.0
       , text >= 2.1
-      , diagnose == 2.*
       , containers >= 0.5.9
+      , safe-coloured-text == 0.3.*
     build-tool-depends: hspec-discover:hspec-discover == 2.*

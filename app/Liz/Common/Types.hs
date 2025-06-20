@@ -67,7 +67,7 @@ newtype Program = Program [SExpr]
   deriving (Show, Eq)
 
 data SExpr = SEIdentifier T.Text LizPos LizPos
-  | SELiteral   T.Text LizPos LizPos
+  | SELiteral   Type T.Text LizPos LizPos
   | SEComment
   | SEFunc      Func
   | SEFuncCall  LizPos LizPos T.Text [SExpr] -- ident - values

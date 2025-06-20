@@ -2,16 +2,11 @@ cabal-version:      3.0
 name:               liz
 version:            0.1.0.0
 
--- synopsis:
--- description:
 license:            BSD-3-Clause
 license-file:       LICENSE
 author:             scheinheiser
 maintainer:         ..
--- copyright:
 build-type:         Simple
--- extra-doc-files:
--- extra-source-files:
 
 common warnings
     ghc-options: -Wall
@@ -23,6 +18,7 @@ executable liz
       , Liz.Common.Types
       , Liz.Common.Error
       , Liz.Sema
+      , Liz.Codegen
     other-extensions: OverloadedStrings
       , NamedDefaults
       , RecordWildCards
@@ -33,6 +29,7 @@ executable liz
       , text >= 2.1
       , containers >= 0.5.9
       , safe-coloured-text == 0.3.*
+      , llvm-pretty
     hs-source-dirs:   app
     default-language: GHC2024
 
@@ -42,6 +39,7 @@ test-suite liz-test
     other-modules: Liz.Parser
       , Liz.ParserSpec
       , Liz.Sema
+      , Liz.Codegen
       , Liz.SemaSpec
       , Liz.Common.Error
       , Liz.Common.Types
@@ -56,4 +54,5 @@ test-suite liz-test
       , text >= 2.1
       , containers >= 0.5.9
       , safe-coloured-text == 0.3.*
+      , llvm-pretty
     build-tool-depends: hspec-discover:hspec-discover == 2.*

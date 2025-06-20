@@ -51,16 +51,23 @@ parseType =
   Bool'   <$ string "Bool" <|>
   Unit'   <$ string "Unit"
 
-parseValue :: Parser T.Text
-parseValue = choice [parseStr, parseChar, parseNum, parseBool, parseUndefined, parseUnit]
+parseValue :: Parser (LizPos -> LizPos -> SExpr)
+parseValue = choice [
+    SELiteral String' <$> parseStr, 
+    SELiteral Char' <$> parseChar,
+    parseNum, 
+    SELiteral Bool' <$> parseBool,
+    SELiteral Undef' <$> parseUndefined,
+    SELiteral Unit' <$> parseUnit
+  ]
 
 parseNested :: Parser SExpr
 parseNested = do
   s <- getCurrentPos
   v <- (do
-    y <- (SELiteral <$> parseValue) <|> (SEIdentifier <$> parseIdent)
+    value <- parseValue <|> (SEIdentifier <$> parseIdent)
     e <- getCurrentPos
-    pure $ y s e) <|> parseSExpr
+    pure $ value s e) <|> parseSExpr
   pure v
 
 -- main parsing functions
@@ -100,8 +107,11 @@ parseChar = do
   d2 <- char '\''
   pure $ T.pack [d1, c, d2]
 
-parseNum :: Parser T.Text
-parseNum = (takeWhile1P (Just "digits 0-9 or '.'") valid) <* notFollowedBy letterChar
+parseNum :: Parser (LizPos -> LizPos -> SExpr)
+parseNum = do
+  n <- (takeWhile1P @_ @T.Text (Just "digits 0-9 or '.'") valid) <* notFollowedBy letterChar
+  if '.' `T.elem` n then pure $ SELiteral Float' n
+                    else pure $ SELiteral Int' n
   where
     valid :: Char -> Bool
     valid = liftA2 (||) isDigit ('.' ==) 
@@ -156,31 +166,10 @@ parseVarDecl = do
       value <- parseNested
       e <- getCurrentPos
       pure $ decl e Var{varIdent=iden, varType=ty, varValue=value}
-    aux decl iden lit@(SELiteral literal _ _) = do
-      ty <- inferType literal
+    aux decl iden lit@(SELiteral ty _ _ _) = do
       e <- getCurrentPos
       pure $ decl e Var{varIdent=iden, varType=ty, varValue=lit}
     aux _ _ op = unsupportedDeclaration $ T.show op
-
-    inferType :: T.Text -> Parser Type
-    inferType v
-      | (count '.' v) == 1 =
-        if (==) 0 $ (removeDigits . T.filter ((/=) '.')) v
-        then pure Float'
-        else failedTypeInference v
-      | removeDigits v == 0 = pure  Int'
-      | (T.take 1 v) == "'" && (T.last v) == '\'' = pure Char'
-      | (T.take 1 v) == "\"" && (T.last v) == '"' = pure String'
-      | v == "True" || v == "False" = pure Bool'
-      | v == "()" = pure Unit'
-      | v == "undefined" = inferredUndefined
-      | otherwise = failedTypeInference v
-      where
-        removeDigits :: T.Text -> Int
-        removeDigits = T.length . T.filter (not . isDigit)
-
-        count :: Char -> T.Text -> Int
-        count t = (T.length . T.filter (t ==))
 
 parseSetStmt :: Parser SExpr
 parseSetStmt = do

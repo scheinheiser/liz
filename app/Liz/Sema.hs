@@ -10,35 +10,34 @@ import qualified Liz.Common.Types as L
 import qualified Data.Map as M
 import qualified Data.Text as T
 
-import Data.Char (isDigit)
-
-data SymbolTbl = SymbolTbl 
-  { symFuncMap  :: M.Map T.Text L.Func
-  , symVarMap   :: M.Map T.Text L.Var
-  , symConstMap :: M.Map T.Text L.Var
+-- TODO: change to only use types, the whole record is unnecessary.
+data Env = Env 
+  { envFuncs  :: M.Map T.Text L.Func
+  , envVars   :: M.Map T.Text L.Var
+  , envConsts :: M.Map T.Text L.Var
   } deriving (Show, Eq)
 
-mkSymTbl :: SymbolTbl
-mkSymTbl = SymbolTbl {symFuncMap = M.empty, symVarMap = M.empty, symConstMap = M.empty}
-
-combineSymTbl :: SymbolTbl -> SymbolTbl -> SymbolTbl
-combineSymTbl (SymbolTbl {symFuncMap=symF1, symVarMap=symV1, symConstMap=symC1}) (SymbolTbl {symFuncMap=symF2, symVarMap=symV2, symConstMap=symC2}) =
-  let
-    symFuncMap  = symF1 `M.union` symF2
-    symVarMap   = symV1 `M.union` symV2
-    symConstMap = symC1 `M.union` symC2
-  in SymbolTbl {symFuncMap, symVarMap, symConstMap}
-
-addFunc :: L.Func -> SymbolTbl -> SymbolTbl
-addFunc f@(L.Func {funcIdent=ident}) tbl@(SymbolTbl {symFuncMap=ftbl}) = tbl {symFuncMap = M.insert ident f ftbl}
-
-addVar :: L.Var -> SymbolTbl -> SymbolTbl
-addVar v@(L.Var {varIdent=ident}) tbl@(SymbolTbl {symVarMap=vtbl}) = tbl {symVarMap = M.insert ident v vtbl}
-
-addConst :: L.Var -> SymbolTbl -> SymbolTbl
-addConst c@(L.Var {varIdent=ident}) tbl@(SymbolTbl {symConstMap=ctbl}) = tbl {symConstMap = M.insert ident c ctbl}
-
 -- helper sema functions
+mkEnv :: Env
+mkEnv = Env {envFuncs = M.empty, envVars = M.empty, envConsts = M.empty}
+
+combineEnv :: Env -> Env -> Env
+combineEnv (Env {envFuncs=symF1, envVars=symV1, envConsts=symC1}) (Env {envFuncs=symF2, envVars=symV2, envConsts=symC2}) =
+  let
+    envFuncs  = symF1 `M.union` symF2
+    envVars   = symV1 `M.union` symV2
+    envConsts = symC1 `M.union` symC2
+  in Env {envFuncs, envVars, envConsts}
+
+addFunc :: L.Func -> Env -> Env
+addFunc f@(L.Func {funcIdent=ident}) env@(Env {envFuncs=fenv}) = env {envFuncs = M.insert ident f fenv}
+
+addVar :: L.Var -> Env -> Env
+addVar v@(L.Var {varIdent=ident}) env@(Env {envVars=venv}) = env {envVars = M.insert ident v venv}
+
+addConst :: L.Var -> Env -> Env
+addConst c@(L.Var {varIdent=ident}) env@(Env {envConsts=cenv}) = env {envConsts = M.insert ident c cenv}
+
 collectErrors :: [Either [E.SemErr] L.Type] -> [E.SemErr] -> [L.Type] -> ([E.SemErr], [L.Type])
 collectErrors [] errs types = (errs, types)
 collectErrors (x : xs) errs types =
@@ -47,12 +46,10 @@ collectErrors (x : xs) errs types =
     Right t -> collectErrors xs errs (t : types)
 
 -- main sema functions
-
--- temp testing function
 testing :: L.Program -> FilePath -> IO ()
 testing (L.Program prog) f = do
   let
-    (res, hasMain) = aux prog mkSymTbl False []
+    (res, hasMain) = aux prog mkEnv False []
     (errs, _) = collectErrors res [] []
   case () of _
               | length errs /= 0 && not hasMain -> E.printErrs f (E.NoEntrypoint : errs) []
@@ -60,7 +57,7 @@ testing (L.Program prog) f = do
               | not hasMain -> E.printErrs f errs []
               | otherwise -> putStrLn "all good"
   where
-    aux :: [L.SExpr] -> SymbolTbl -> Bool -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Bool)
+    aux :: [L.SExpr] -> Env -> Bool -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Bool)
     aux [] _ hasMain acc = (acc, hasMain)
     aux (ex@(L.SEFunc L.Func{funcIdent=i}) : exprs) sym hasMain acc =
       let
@@ -76,7 +73,7 @@ testing (L.Program prog) f = do
 analyseProgram :: L.Program -> Either [E.SemErr] L.Program
 analyseProgram p@(L.Program prog) = 
   let
-    (res, hasMain) = aux prog mkSymTbl False []
+    (res, hasMain) = aux prog mkEnv False []
     (errs, _) = collectErrors res [] []
   in
   case () of _
@@ -85,7 +82,7 @@ analyseProgram p@(L.Program prog) =
               | not hasMain -> Left [E.NoEntrypoint]
               | otherwise -> Right p
   where
-    aux :: [L.SExpr] -> SymbolTbl -> Bool -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Bool)
+    aux :: [L.SExpr] -> Env -> Bool -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Bool)
     aux [] _ hasMain acc = (acc, hasMain)
     aux (ex@(L.SEFunc L.Func{funcIdent=i}) : exprs) sym hasMain acc =
       let
@@ -97,60 +94,40 @@ analyseProgram p@(L.Program prog) =
         (res, next) = infer ex sym
       in aux exprs next hasMain (res : acc)
 
-infer :: L.SExpr -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
-infer (L.SEIdentifier iden s e) tbl = inferIdentifier s e iden tbl
-infer (L.SELiteral lit s e) tbl = (inferLiteral s e lit, tbl)
-infer (L.SEUnary op s e v) tbl = inferUnary s e op v tbl
-infer (L.SEBinary op s e l r) tbl = inferBinary s e op l r tbl
-infer (L.SEVar s e v) tbl = inferVariable s e v tbl False
-infer (L.SEConst s e v) tbl = inferVariable s e v tbl True
-infer (L.SESet s e i v) tbl = inferSet s e i v tbl
-infer (L.SEReturn _ _ v) tbl = infer v tbl
-infer (L.SEPrint _ _ v) tbl = infer v tbl
-infer (L.SEFunc f) tbl = inferFunc f tbl
-infer (L.SEFuncCall s e iden args) tbl = inferFuncCall s e iden args tbl
-infer L.SEComment tbl = (Right L.String', tbl)
-infer s tbl = (Left [E.NotImplemented s], tbl)
+infer :: L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
+infer (L.SEIdentifier iden s e) env = inferIdentifier s e iden env
+infer (L.SELiteral ty _ _ _) env = (Right ty, env)
+infer (L.SEUnary op s e v) env = inferUnary s e op v env
+infer (L.SEBinary op s e l r) env = inferBinary s e op l r env
+infer (L.SEVar s e v) env = inferVariable s e v env False
+infer (L.SEConst s e v) env = inferVariable s e v env True
+infer (L.SESet s e i v) env = inferSet s e i v env
+infer (L.SEReturn _ _ v) env = infer v env
+infer (L.SEPrint _ _ _) env = (Right L.Unit', env)
+infer (L.SEFunc f) env = inferFunc f env
+infer (L.SEFuncCall s e iden args) env = inferFuncCall s e iden args env
+infer L.SEComment env = (Right L.String', env)
+infer s env = (Left [E.NotImplemented s], env)
 
-inferIdentifier :: L.LizPos -> L.LizPos -> T.Text -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
-inferIdentifier s e iden tbl@(SymbolTbl {symFuncMap=ftbl, symVarMap=vtbl, symConstMap=ctbl}) =
+inferIdentifier :: L.LizPos -> L.LizPos -> T.Text -> Env -> (Either [E.SemErr] L.Type, Env)
+inferIdentifier s e iden env@(Env {envFuncs=fenv, envVars=venv, envConsts=cenv}) =
   let
-    func = iden `M.lookup` ftbl
-    var = iden `M.lookup` vtbl
-    constant = iden `M.lookup` ctbl
+    func = iden `M.lookup` fenv
+    var = iden `M.lookup` venv
+    constant = iden `M.lookup` cenv
   in aux s e iden func var constant
   where
-    aux st end i (Just _) (Just _) _ = (Left $ [E.IdentifierAlreadyInUse st end i], tbl)
-    aux st end i (Just _) _ (Just _) = (Left $ [E.IdentifierAlreadyInUse st end i], tbl)
-    aux st end i _ (Just _) (Just _) = (Left $ [E.IdentifierAlreadyInUse st end i], tbl)
-    aux _ _ _ (Just L.Func{funcReturnType=ty}) _ _ = (Right ty, tbl)
-    aux _ _ _ _ (Just L.Var{varType=ty}) _ = (Right ty, tbl)
-    aux _ _ _ _ _ (Just L.Var{varType=ty}) = (Right ty, tbl)
-    aux st end i Nothing Nothing Nothing = (Left $ [E.UndefinedIdentifier st end i], tbl)
+    aux st end i (Just _) (Just _) _ = (Left $ [E.IdentifierAlreadyInUse st end i], env)
+    aux st end i (Just _) _ (Just _) = (Left $ [E.IdentifierAlreadyInUse st end i], env)
+    aux st end i _ (Just _) (Just _) = (Left $ [E.IdentifierAlreadyInUse st end i], env)
+    aux _ _ _ (Just L.Func{funcReturnType=ty}) _ _ = (Right ty, env)
+    aux _ _ _ _ (Just L.Var{varType=ty}) _ = (Right ty, env)
+    aux _ _ _ _ _ (Just L.Var{varType=ty}) = (Right ty, env)
+    aux st end i Nothing Nothing Nothing = (Left $ [E.UndefinedIdentifier st end i], env)
 
-inferLiteral :: L.LizPos -> L.LizPos -> T.Text -> Either [E.SemErr] L.Type
-inferLiteral s e v
-  | (count '.' v) == 1 =
-    if (==) 0 $ (removeDigits . T.filter ((/=) '.')) v
-    then pure L.Float'
-    else Left $ [E.FailedLitInference s e v]
-  | removeDigits v == 0 = pure L.Int'
-  | (T.take 1 v) == "'" && (T.last v) == '\'' = pure L.Char'
-  | (T.take 1 v) == "\"" && (T.last v) == '"' = pure L.String'
-  | v == "True" || v == "False" = pure L.Bool'
-  | v == "()" = pure L.Unit'
-  | v == "undefined" = pure L.Undef'
-  | otherwise = Left $ [E.FailedLitInference s e v]
-  where
-    removeDigits :: T.Text -> Int
-    removeDigits = T.length . T.filter (not . isDigit)
-
-    count :: Char -> T.Text -> Int
-    count t = (T.length . T.filter (t ==))
-
-inferUnary :: L.LizPos -> L.LizPos -> L.UnaryOp -> L.SExpr -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
-inferUnary s e op v tbl =
-  case (infer v tbl) of
+inferUnary :: L.LizPos -> L.LizPos -> L.UnaryOp -> L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
+inferUnary s e op v env =
+  case (infer v env) of
     err@((Left _), _) -> err
     (Right operandType, t) -> (aux op operandType, t)
   where
@@ -162,12 +139,12 @@ inferUnary s e op v tbl =
     aux L.Not L.Bool' = Right L.Bool'
     aux L.Not t = Left $ [E.IncorrectType s e L.Bool' t]
 
-inferBinary :: L.LizPos -> L.LizPos -> L.BinaryOp -> L.SExpr -> L.SExpr -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
-inferBinary s e op l r tbl =
-  case (infer l tbl, infer r tbl) of
+inferBinary :: L.LizPos -> L.LizPos -> L.BinaryOp -> L.SExpr -> L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
+inferBinary s e op l r env =
+  case (infer l env, infer r env) of
     (err@(Left _, _), _) -> err
     (_, err@(Left _, _)) -> err
-    ((Right leftType, t1), (Right rightType, t2)) -> (aux op leftType rightType, t1 `combineSymTbl` t2)
+    ((Right leftType, nenv), (Right rightType, _)) -> (aux op leftType rightType, nenv) -- can't define stuff in binary sexprs
   where
     aux :: L.BinaryOp -> L.Type -> L.Type -> Either [E.SemErr] L.Type
     aux L.Concat L.String' L.String' = Right L.String'
@@ -188,71 +165,71 @@ inferBinary s e op l r tbl =
       | lt == rt = Right L.Bool'
       | otherwise = Left $ [E.IncorrectType s e lt rt]
 
-inferVariable :: L.LizPos -> L.LizPos -> L.Var -> SymbolTbl -> Bool -> (Either [E.SemErr] L.Type, SymbolTbl)
-inferVariable s e var@L.Var{..} tbl isConst =
-  case (infer varValue tbl) of
+inferVariable :: L.LizPos -> L.LizPos -> L.Var -> Env -> Bool -> (Either [E.SemErr] L.Type, Env)
+inferVariable s e var@L.Var{..} env isConst =
+  case (infer varValue env) of
     err@(Left _, _) -> err
-    (Right ty, ntbl) -> aux varIdent varType ty ntbl
+    (Right ty, nenv) -> aux varIdent varType ty nenv
   where
-    aux :: T.Text -> L.Type -> L.Type -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
-    aux ident decType valType t@(SymbolTbl {symVarMap=varMap, symConstMap=constMap, symFuncMap=funcMap})
-      | ident `M.member` varMap || ident `M.member` constMap || ident `M.member` funcMap = (Left $ [E.IdentifierAlreadyInUse s e ident], tbl)
+    aux :: T.Text -> L.Type -> L.Type -> Env -> (Either [E.SemErr] L.Type, Env)
+    aux ident decType valType t@(Env {envVars=varMap, envConsts=constMap, envFuncs=funcMap})
+      | ident `M.member` varMap || ident `M.member` constMap || ident `M.member` funcMap = (Left $ [E.IdentifierAlreadyInUse s e ident], env)
       | valType /= decType && valType /= L.Undef' = 
-        let newTbl = M.insert ident var -- so that you don't get a bunch of undefined variable errors.
-        in if isConst then (Left $ [E.IncorrectType s e decType valType], t{symConstMap=newTbl constMap})
-                      else (Left $ [E.IncorrectType s e decType valType], t{symVarMap=newTbl varMap})
+        let newenv = M.insert ident var -- so that you don't get a bunch of undefined variable errors.
+        in if isConst then (Left $ [E.IncorrectType s e decType valType], t{envConsts=newenv constMap})
+                      else (Left $ [E.IncorrectType s e decType valType], t{envVars=newenv varMap})
       | otherwise = 
-        let newtbl = M.insert ident var 
-        in if isConst then (Right decType, t{symConstMap=newtbl constMap})
-                      else (Right decType, t{symVarMap=newtbl varMap})
+        let newenv = M.insert ident var 
+        in if isConst then (Right decType, t{envConsts=newenv constMap})
+                      else (Right decType, t{envVars=newenv varMap})
 
-inferSet :: L.LizPos -> L.LizPos -> T.Text -> L.SExpr -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
-inferSet s e ident v tbl =
-  case (infer v tbl) of
+inferSet :: L.LizPos -> L.LizPos -> T.Text -> L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
+inferSet s e ident v env =
+  case (infer v env) of
     err@(Left _, _) -> err
-    (Right ty, ntbl) -> aux ident ty ntbl
+    (Right ty, nenv) -> aux ident ty nenv
   where
-    aux :: T.Text -> L.Type -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
-    aux i ty table@(SymbolTbl{..})
-      | i `M.member` symConstMap = (Left $ [E.AssigningToConstant s e i], table)
-      | i `M.member` symFuncMap = (Left $ [E.AssigningToFunction s e ident], table)
+    aux :: T.Text -> L.Type -> Env -> (Either [E.SemErr] L.Type, Env)
+    aux i ty table@(Env{..})
+      | i `M.member` envConsts = (Left $ [E.AssigningToConstant s e i], table)
+      | i `M.member` envFuncs = (Left $ [E.AssigningToFunction s e ident], table)
       | otherwise =
-        let value = i `M.lookup` symVarMap in 
+        let value = i `M.lookup` envVars in 
         case value of
           Nothing -> (Left $ [E.UndefinedIdentifier s e i], table)
           Just x | (L.varType x) == ty -> (Right ty, table)
                  | otherwise -> let correctType = L.varType x in (Left $ [E.IncorrectType s e correctType ty], table)
 
-inferFunc :: L.Func -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
-inferFunc f@(L.Func{..}) tbl@(SymbolTbl{..})
-  | funcIdent `M.member` symFuncMap || funcIdent `M.member` symVarMap || funcIdent `M.member` symConstMap = (Left $ [E.IdentifierAlreadyInUse funcStart funcEnd funcIdent], tbl)
+inferFunc :: L.Func -> Env -> (Either [E.SemErr] L.Type, Env)
+inferFunc f@(L.Func{..}) env@(Env{..})
+  | funcIdent `M.member` envFuncs || funcIdent `M.member` envVars || funcIdent `M.member` envConsts = (Left $ [E.IdentifierAlreadyInUse funcStart funcEnd funcIdent], env)
   | otherwise =
     let
-      tblWithArgs = flip addArgs tbl $ map (\L.Arg{..} -> L.Var{varIdent=argIdent, varType=argType}) funcArgs
-      (result, ntbl, vis, cis, fis) = evaluateFuncBody funcBody tblWithArgs
+      envWithArgs = flip addArgs env $ map (\L.Arg{..} -> L.Var{varIdent=argIdent, varType=argType}) funcArgs
+      (result, nenv, vis, cis, fis) = evaluateFuncBody funcBody envWithArgs
       errsAndTypes = collectErrors result [] []
-    in aux (map L.argIdent funcArgs) vis cis fis errsAndTypes funcReturnType ntbl
+    in aux (map L.argIdent funcArgs) vis cis fis errsAndTypes funcReturnType nenv
   where
-    aux argIdents vis cis fis (errs, types) ret table@(SymbolTbl {symConstMap=constMap, symVarMap=varMap, symFuncMap=funcMap}) =
+    aux argIdents vis cis fis (errs, types) ret table@(Env {envConsts=constMap, envVars=varMap, envFuncs=funcMap}) =
       let
       -- removing anything declared within the function from the table.
           nixConsts = foldl' (flip M.delete) constMap (argIdents ++ cis)
           nixVars = foldl' (flip M.delete) varMap vis
           nixFuncs = foldl' (flip M.delete) funcMap fis
-          nixFuncDefsTbl = table{symConstMap=nixConsts, symVarMap=nixVars, symFuncMap=nixFuncs}
+          nixFuncDefsenv = table{envConsts=nixConsts, envVars=nixVars, envFuncs=nixFuncs}
       in 
       case () of _
-                  | last types /= ret -> (Left $ [E.IncorrectType funcStart funcEnd ret (last types)], nixFuncDefsTbl)
-                  | length errs /= 0 -> (Left errs, nixFuncDefsTbl)
+                  | last types /= ret -> (Left $ [E.IncorrectType funcStart funcEnd ret (last types)], nixFuncDefsenv)
+                  | length errs /= 0 -> (Left errs, nixFuncDefsenv)
                   | otherwise -> 
                       let newFuncMap = M.insert funcIdent f (nixFuncs)
-                      in (Right ret, nixFuncDefsTbl{symFuncMap=newFuncMap})
+                      in (Right ret, nixFuncDefsenv{envFuncs=newFuncMap})
 
-    addArgs :: [L.Var] -> SymbolTbl -> SymbolTbl
+    addArgs :: [L.Var] -> Env -> Env
     addArgs [] table = table
     addArgs (x : xs) table = addArgs xs $ addConst x table -- args are constant by default
 
-    evaluateFuncBody :: [L.SExpr] -> SymbolTbl -> ([Either [E.SemErr] L.Type], SymbolTbl, [T.Text], [T.Text], [T.Text])
+    evaluateFuncBody :: [L.SExpr] -> Env -> ([Either [E.SemErr] L.Type], Env, [T.Text], [T.Text], [T.Text])
     evaluateFuncBody sexprs t = go sexprs t [] [] [] []
       where
         go [] table acc varIdents constIdents funcIdents = (acc, table, varIdents, constIdents, funcIdents)
@@ -264,28 +241,28 @@ inferFunc f@(L.Func{..}) tbl@(SymbolTbl{..})
             (L.SEFunc L.Func{funcIdent=i}) -> go xs nt (res : acc) varIdents constIdents (i : funcIdents)
             _ -> go xs nt (res : acc) varIdents constIdents funcIdents
 
-inferFuncCall :: L.LizPos -> L.LizPos -> T.Text -> [L.SExpr] -> SymbolTbl -> (Either [E.SemErr] L.Type, SymbolTbl)
-inferFuncCall s e ident sexprs tbl@(SymbolTbl{..})
-  | ident `M.notMember` symFuncMap || ident `M.member` symConstMap || ident `M.member` symVarMap = (Left $ [E.UndefinedIdentifier s e ident], tbl)
+inferFuncCall :: L.LizPos -> L.LizPos -> T.Text -> [L.SExpr] -> Env -> (Either [E.SemErr] L.Type, Env)
+inferFuncCall s e ident sexprs env@(Env{..})
+  | ident `M.notMember` envFuncs || ident `M.member` envConsts || ident `M.member` envVars = (Left $ [E.UndefinedIdentifier s e ident], env)
   | otherwise =
-    case (ident `M.lookup` symFuncMap) of
-        Nothing -> (Left $ [E.UndefinedIdentifier s e ident], tbl)
+    case (ident `M.lookup` envFuncs) of
+        Nothing -> (Left $ [E.UndefinedIdentifier s e ident], env)
         Just (L.Func{funcReturnType=retType, funcArgs=args}) ->
           let 
-            evaluated_sexprs = map (fst . flip infer tbl) sexprs 
+            evaluated_sexprs = map (fst . flip infer env) sexprs 
             argTypes = map L.argType args
             (errs, types) = collectErrors evaluated_sexprs [] []
-          in if length errs /= 0 then (Left errs, tbl)
+          in if length errs /= 0 then (Left errs, env)
                                  else aux types argTypes retType
   where
-    aux :: [L.Type] -> [L.Type] -> L.Type -> (Either [E.SemErr] L.Type, SymbolTbl)
+    aux :: [L.Type] -> [L.Type] -> L.Type -> (Either [E.SemErr] L.Type, Env)
     aux ts as ret 
-      | length ts > length as = (Left $ [E.TooManyArgs s e ident (length ts - length as)], tbl)
-      | length ts < length as = (Left $ [E.NotEnoughArgs s e ident (length as - length ts)], tbl) 
+      | length ts > length as = (Left $ [E.TooManyArgs s e ident (length ts - length as)], env)
+      | length ts < length as = (Left $ [E.NotEnoughArgs s e ident (length as - length ts)], env) 
       | otherwise =
         let wts = findWrongTypes ts as in
-        if length wts /= 0 then (Left $ [E.IncorrectArgTypes s e ident as wts], tbl)
-                           else (Right ret, tbl)
+        if length wts /= 0 then (Left $ [E.IncorrectArgTypes s e ident as wts], env)
+                           else (Right ret, env)
 
     findWrongTypes :: [L.Type] -> [L.Type] -> [L.Type]
     findWrongTypes [] _ = []

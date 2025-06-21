@@ -29,7 +29,6 @@ executable liz
       , text >= 2.1
       , containers >= 0.5.9
       , safe-coloured-text == 0.3.*
-      , llvm-pretty
     hs-source-dirs:   app
     default-language: GHC2024
 
@@ -54,5 +53,4 @@ test-suite liz-test
       , text >= 2.1
       , containers >= 0.5.9
       , safe-coloured-text == 0.3.*
-      , llvm-pretty
     build-tool-depends: hspec-discover:hspec-discover == 2.*

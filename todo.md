@@ -16,4 +16,5 @@
 - [ ] Allow declarations in any order.
 
 ## Codegen
-- [x] Decide between using LLVM or asm for IR. (using LLVM baby)
+- [x] Decide between using LLVM or asm for IR. (using QBE instead)
+- [ ] Make a QBE pretty printing library.

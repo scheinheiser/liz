@@ -10,11 +10,10 @@ import qualified Liz.Common.Types as L
 import qualified Data.Map as M
 import qualified Data.Text as T
 
--- TODO: change to only use types, the whole record is unnecessary.
 data Env = Env 
-  { envFuncs  :: M.Map T.Text L.Func
-  , envVars   :: M.Map T.Text L.Var
-  , envConsts :: M.Map T.Text L.Var
+  { envFuncs  :: M.Map T.Text (L.Type, [L.Type])
+  , envVars   :: M.Map T.Text L.Type
+  , envConsts :: M.Map T.Text L.Type
   } deriving (Show, Eq)
 
 -- helper sema functions
@@ -28,15 +27,6 @@ combineEnv (Env {envFuncs=symF1, envVars=symV1, envConsts=symC1}) (Env {envFuncs
     envVars   = symV1 `M.union` symV2
     envConsts = symC1 `M.union` symC2
   in Env {envFuncs, envVars, envConsts}
-
-addFunc :: L.Func -> Env -> Env
-addFunc f@(L.Func {funcIdent=ident}) env@(Env {envFuncs=fenv}) = env {envFuncs = M.insert ident f fenv}
-
-addVar :: L.Var -> Env -> Env
-addVar v@(L.Var {varIdent=ident}) env@(Env {envVars=venv}) = env {envVars = M.insert ident v venv}
-
-addConst :: L.Var -> Env -> Env
-addConst c@(L.Var {varIdent=ident}) env@(Env {envConsts=cenv}) = env {envConsts = M.insert ident c cenv}
 
 collectErrors :: [Either [E.SemErr] L.Type] -> [E.SemErr] -> [L.Type] -> ([E.SemErr], [L.Type])
 collectErrors [] errs types = (errs, types)
@@ -112,18 +102,21 @@ infer s env = (Left [E.NotImplemented s], env)
 inferIdentifier :: L.LizPos -> L.LizPos -> T.Text -> Env -> (Either [E.SemErr] L.Type, Env)
 inferIdentifier s e iden env@(Env {envFuncs=fenv, envVars=venv, envConsts=cenv}) =
   let
-    func = iden `M.lookup` fenv
-    var = iden `M.lookup` venv
-    constant = iden `M.lookup` cenv
+    func = iden `M.member` fenv
+    var = iden `M.member` venv
+    constant = iden `M.member` cenv
   in aux s e iden func var constant
   where
-    aux st end i (Just _) (Just _) _ = (Left $ [E.IdentifierAlreadyInUse st end i], env)
-    aux st end i (Just _) _ (Just _) = (Left $ [E.IdentifierAlreadyInUse st end i], env)
-    aux st end i _ (Just _) (Just _) = (Left $ [E.IdentifierAlreadyInUse st end i], env)
-    aux _ _ _ (Just L.Func{funcReturnType=ty}) _ _ = (Right ty, env)
-    aux _ _ _ _ (Just L.Var{varType=ty}) _ = (Right ty, env)
-    aux _ _ _ _ _ (Just L.Var{varType=ty}) = (Right ty, env)
-    aux st end i Nothing Nothing Nothing = (Left $ [E.UndefinedIdentifier st end i], env)
+    aux st end i True True _ = (Left $ [E.IdentifierAlreadyInUse st end i], env)
+    aux st end i True _ True = (Left $ [E.IdentifierAlreadyInUse st end i], env)
+    aux st end i _ True True = (Left $ [E.IdentifierAlreadyInUse st end i], env)
+    -- aux _ _ _ (Just L.Func{funcReturnType=ty}) _ _ = (Right ty, env)
+    aux _ _ _ True _ _ = let (ty, _) = fenv M.! iden in (Right ty, env)
+    -- aux _ _ _ _ (Just L.Var{varType=ty}) _ = (Right ty, env)
+    aux _ _ _ _ True _ = let ty = venv M.! iden in (Right ty, env)
+    -- aux _ _ _ _ _ (Just L.Var{varType=ty}) = (Right ty, env)
+    aux _ _ _ _ _ True = let ty = cenv M.! iden in (Right ty, env)
+    aux st end i False False False = (Left $ [E.UndefinedIdentifier st end i], env)
 
 inferUnary :: L.LizPos -> L.LizPos -> L.UnaryOp -> L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
 inferUnary s e op v env =
@@ -166,7 +159,7 @@ inferBinary s e op l r env =
       | otherwise = Left $ [E.IncorrectType s e lt rt]
 
 inferVariable :: L.LizPos -> L.LizPos -> L.Var -> Env -> Bool -> (Either [E.SemErr] L.Type, Env)
-inferVariable s e var@L.Var{..} env isConst =
+inferVariable s e L.Var{..} env isConst =
   case (infer varValue env) of
     err@(Left _, _) -> err
     (Right ty, nenv) -> aux varIdent varType ty nenv
@@ -175,11 +168,11 @@ inferVariable s e var@L.Var{..} env isConst =
     aux ident decType valType t@(Env {envVars=varMap, envConsts=constMap, envFuncs=funcMap})
       | ident `M.member` varMap || ident `M.member` constMap || ident `M.member` funcMap = (Left $ [E.IdentifierAlreadyInUse s e ident], env)
       | valType /= decType && valType /= L.Undef' = 
-        let newenv = M.insert ident var -- so that you don't get a bunch of undefined variable errors.
+        let newenv = M.insert ident varType -- so that you don't get a bunch of undefined variable errors.
         in if isConst then (Left $ [E.IncorrectType s e decType valType], t{envConsts=newenv constMap})
                       else (Left $ [E.IncorrectType s e decType valType], t{envVars=newenv varMap})
       | otherwise = 
-        let newenv = M.insert ident var 
+        let newenv = M.insert ident valType 
         in if isConst then (Right decType, t{envConsts=newenv constMap})
                       else (Right decType, t{envVars=newenv varMap})
 
@@ -197,15 +190,16 @@ inferSet s e ident v env =
         let value = i `M.lookup` envVars in 
         case value of
           Nothing -> (Left $ [E.UndefinedIdentifier s e i], table)
-          Just x | (L.varType x) == ty -> (Right ty, table)
-                 | otherwise -> let correctType = L.varType x in (Left $ [E.IncorrectType s e correctType ty], table)
+          Just correctType | correctType == ty -> (Right ty, table)
+                           | otherwise -> (Left $ [E.IncorrectType s e correctType ty], table)
 
 inferFunc :: L.Func -> Env -> (Either [E.SemErr] L.Type, Env)
-inferFunc f@(L.Func{..}) env@(Env{..})
+inferFunc (L.Func{..}) env@(Env{..})
   | funcIdent `M.member` envFuncs || funcIdent `M.member` envVars || funcIdent `M.member` envConsts = (Left $ [E.IdentifierAlreadyInUse funcStart funcEnd funcIdent], env)
   | otherwise =
     let
-      envWithArgs = flip addArgs env $ map (\L.Arg{..} -> L.Var{varIdent=argIdent, varType=argType}) funcArgs
+      -- envWithArgs = flip addArgs env $ map (\L.Arg{..} -> L.Var{varIdent=argIdent, varType=argType}) funcArgs
+      envWithArgs = flip addArgs env $ map (\L.Arg{..} -> (argIdent, argType)) funcArgs
       (result, nenv, vis, cis, fis) = evaluateFuncBody funcBody envWithArgs
       errsAndTypes = collectErrors result [] []
     in aux (map L.argIdent funcArgs) vis cis fis errsAndTypes funcReturnType nenv
@@ -222,12 +216,12 @@ inferFunc f@(L.Func{..}) env@(Env{..})
                   | last types /= ret -> (Left $ [E.IncorrectType funcStart funcEnd ret (last types)], nixFuncDefsenv)
                   | length errs /= 0 -> (Left errs, nixFuncDefsenv)
                   | otherwise -> 
-                      let newFuncMap = M.insert funcIdent f (nixFuncs)
+                      let newFuncMap = M.insert funcIdent (funcReturnType, (map L.argType funcArgs)) (nixFuncs)
                       in (Right ret, nixFuncDefsenv{envFuncs=newFuncMap})
 
-    addArgs :: [L.Var] -> Env -> Env
+    addArgs :: [(T.Text, L.Type)] -> Env -> Env
     addArgs [] table = table
-    addArgs (x : xs) table = addArgs xs $ addConst x table -- args are constant by default
+    addArgs ((i, t) : xs) e@(Env{envConsts=cenv}) = addArgs xs $ e{envConsts=M.insert i t cenv}-- args are constant by default
 
     evaluateFuncBody :: [L.SExpr] -> Env -> ([Either [E.SemErr] L.Type], Env, [T.Text], [T.Text], [T.Text])
     evaluateFuncBody sexprs t = go sexprs t [] [] [] []
@@ -247,13 +241,12 @@ inferFuncCall s e ident sexprs env@(Env{..})
   | otherwise =
     case (ident `M.lookup` envFuncs) of
         Nothing -> (Left $ [E.UndefinedIdentifier s e ident], env)
-        Just (L.Func{funcReturnType=retType, funcArgs=args}) ->
+        Just (ty, argTys) ->
           let 
             evaluated_sexprs = map (fst . flip infer env) sexprs 
-            argTypes = map L.argType args
             (errs, types) = collectErrors evaluated_sexprs [] []
           in if length errs /= 0 then (Left errs, env)
-                                 else aux types argTypes retType
+                                 else aux types argTys ty
   where
     aux :: [L.Type] -> [L.Type] -> L.Type -> (Either [E.SemErr] L.Type, Env)
     aux ts as ret 

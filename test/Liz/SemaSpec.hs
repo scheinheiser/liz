@@ -5,19 +5,29 @@ module Liz.SemaSpec (spec) where
 
 import Test.Hspec
 import Text.Megaparsec
+import Data.Map (insert)
 
 import qualified Liz.Parser as P
 import qualified Liz.Common.Types as L
 import qualified Liz.Common.Error as E
 import qualified Liz.Sema as S
 
+-- convenience and helper functions
 getOutput :: Either a b -> b
 getOutput (Right x) = x
 
 base :: (Pos, Pos)
 base = (mkPos 1, mkPos 2)
 
--- to circumvent the checks for a 'main' function in the sema function.
+addFunc :: L.Func -> S.Env -> S.Env
+addFunc (L.Func {funcIdent=ident, funcReturnType=ty, funcArgs=args}) env@(S.Env {envFuncs=fenv}) = env {S.envFuncs = insert ident (ty, (map L.argType args)) fenv}
+
+addVar :: L.Var -> S.Env -> S.Env
+addVar (L.Var {varIdent=ident, varType=ty}) env@(S.Env {envVars=venv}) = env {S.envVars = insert ident ty venv}
+
+addConst :: L.Var -> S.Env -> S.Env
+addConst (L.Var {varIdent=ident, varType=ty}) env@(S.Env {envConsts=cenv}) = env {S.envConsts = insert ident ty cenv}
+
 analyseProgram :: L.Program -> Either [E.SemErr] L.Program
 analyseProgram p@(L.Program prog) = 
   let
@@ -171,25 +181,25 @@ spec = do
       it "Check an explicitly-typed variable" $ do
         let parsed = parse P.parseNested "" "(var hello_world String \"hello world\")"
         let output = getOutput parsed
-        let ntbl = S.addVar L.Var {varValue=L.SELiteral L.String' "\"hello world\"" (mkPos 1, mkPos 25) (mkPos 1, mkPos 38), varType=L.String', varIdent="hello_world"} S.mkEnv
+        let ntbl = addVar L.Var {varValue=L.SELiteral L.String' "\"hello world\"" (mkPos 1, mkPos 25) (mkPos 1, mkPos 38), varType=L.String', varIdent="hello_world"} S.mkEnv
         (S.infer output S.mkEnv) `shouldBe` (Right L.String', ntbl)
 
       it "Fail checking an explicitly-typed variable due to the literal-declaration type mismatch" $ do
         let parsed = parse P.parseNested "" "(var hello_world String 50)"
         let output = getOutput parsed
-        let ntbl = S.addVar L.Var {varIdent="hello_world", varType=L.String', varValue=L.SELiteral L.Int' "50" (mkPos 1,mkPos 25) (mkPos 1,mkPos 27)} S.mkEnv
+        let ntbl = addVar L.Var {varIdent="hello_world", varType=L.String', varValue=L.SELiteral L.Int' "50" (mkPos 1,mkPos 25) (mkPos 1,mkPos 27)} S.mkEnv
         (S.infer output S.mkEnv) `shouldBe` (Left [E.IncorrectType base (mkPos 1, mkPos 27) L.String' L.Int'], ntbl)
 
       it "Check an inferred variable declaration" $ do
         let parsed = parse P.parseNested "" "(const unit ())"
         let output = getOutput parsed
-        let ntbl = S.addConst L.Var {varValue=L.SELiteral L.Unit' "()" (mkPos 1, mkPos 13) (mkPos 1, mkPos 15), varType=L.Unit', varIdent="unit"} S.mkEnv
+        let ntbl = addConst L.Var {varValue=L.SELiteral L.Unit' "()" (mkPos 1, mkPos 13) (mkPos 1, mkPos 15), varType=L.Unit', varIdent="unit"} S.mkEnv
         (S.infer output S.mkEnv) `shouldBe` (Right L.Unit', ntbl)
 
       it "Check a nested variable declaration" $ do
         let parsed = parse P.parseNested "" "(const boolean Bool (== 5 8))"
         let output = getOutput parsed
-        let ntbl = S.addConst L.Var {
+        let ntbl = addConst L.Var {
           varValue=L.SEBinary L.Eql (mkPos 1, mkPos 22) (mkPos 1, mkPos 28) (L.SELiteral L.Int' "5" (mkPos 1, mkPos 25) (mkPos 1, mkPos 26)) (L.SELiteral L.Int' "8" (mkPos 1, mkPos 27) (mkPos 1, mkPos 28)), 
           varType=L.Bool', 
           varIdent="boolean"
@@ -203,7 +213,7 @@ spec = do
           \"""
         let parsed = parse P.parseSExpr "" func
         let output = getOutput parsed
-        let ntbl = S.addFunc L.Func {
+        let ntbl = addFunc L.Func {
           funcIdent = "does_nothing", 
           funcStart = base,
           funcEnd = (mkPos 2, mkPos 14),
@@ -222,7 +232,7 @@ spec = do
           \"""
         let parsed = parse P.parseSExpr "" func
         let output = getOutput parsed
-        let ntbl = S.addFunc L.Func {
+        let ntbl = addFunc L.Func {
           funcIdent = "does_something", 
           funcStart = base,
           funcEnd = (mkPos 4, mkPos 21),
@@ -244,7 +254,7 @@ spec = do
         \"""
         let parsed = parse P.parseSExpr "" func
         let output = getOutput parsed
-        let ntbl = S.addFunc L.Func {
+        let ntbl = addFunc L.Func {
           funcIdent = "increment_and_print",
           funcStart = base,
           funcEnd = (mkPos 3, mkPos 14),
@@ -263,7 +273,7 @@ spec = do
         \"""
         let parsed = parse P.parseSExpr "" func
         let output = getOutput parsed
-        let ntbl = S.addFunc L.Func {
+        let ntbl = addFunc L.Func {
           funcIdent = "flip",
           funcStart = base,
           funcEnd = (mkPos 2, mkPos 19),

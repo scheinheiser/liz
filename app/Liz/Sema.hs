@@ -110,11 +110,8 @@ inferIdentifier s e iden env@(Env {envFuncs=fenv, envVars=venv, envConsts=cenv})
     aux st end i True True _ = (Left $ [E.IdentifierAlreadyInUse st end i], env)
     aux st end i True _ True = (Left $ [E.IdentifierAlreadyInUse st end i], env)
     aux st end i _ True True = (Left $ [E.IdentifierAlreadyInUse st end i], env)
-    -- aux _ _ _ (Just L.Func{funcReturnType=ty}) _ _ = (Right ty, env)
     aux _ _ _ True _ _ = let (ty, _) = fenv M.! iden in (Right ty, env)
-    -- aux _ _ _ _ (Just L.Var{varType=ty}) _ = (Right ty, env)
     aux _ _ _ _ True _ = let ty = venv M.! iden in (Right ty, env)
-    -- aux _ _ _ _ _ (Just L.Var{varType=ty}) = (Right ty, env)
     aux _ _ _ _ _ True = let ty = cenv M.! iden in (Right ty, env)
     aux st end i False False False = (Left $ [E.UndefinedIdentifier st end i], env)
 
@@ -198,7 +195,6 @@ inferFunc (L.Func{..}) env@(Env{..})
   | funcIdent `M.member` envFuncs || funcIdent `M.member` envVars || funcIdent `M.member` envConsts = (Left $ [E.IdentifierAlreadyInUse funcStart funcEnd funcIdent], env)
   | otherwise =
     let
-      -- envWithArgs = flip addArgs env $ map (\L.Arg{..} -> L.Var{varIdent=argIdent, varType=argType}) funcArgs
       envWithArgs = flip addArgs env $ map (\L.Arg{..} -> (argIdent, argType)) funcArgs
       (result, nenv, vis, cis, fis) = evaluateFuncBody funcBody envWithArgs
       errsAndTypes = collectErrors result [] []
@@ -206,11 +202,11 @@ inferFunc (L.Func{..}) env@(Env{..})
   where
     aux argIdents vis cis fis (errs, types) ret table@(Env {envConsts=constMap, envVars=varMap, envFuncs=funcMap}) =
       let
-      -- removing anything declared within the function from the table.
-          nixConsts = foldl' (flip M.delete) constMap (argIdents ++ cis)
-          nixVars = foldl' (flip M.delete) varMap vis
-          nixFuncs = foldl' (flip M.delete) funcMap fis
-          nixFuncDefsenv = table{envConsts=nixConsts, envVars=nixVars, envFuncs=nixFuncs}
+        -- removing anything declared within the function from the table.
+        nixConsts = foldl' (flip M.delete) constMap (argIdents <> cis)
+        nixVars = foldl' (flip M.delete) varMap vis
+        nixFuncs = foldl' (flip M.delete) funcMap fis
+        nixFuncDefsenv = table{envConsts=nixConsts, envVars=nixVars, envFuncs=nixFuncs}
       in 
       case () of _
                   | last types /= ret -> (Left $ [E.IncorrectType funcStart funcEnd ret (last types)], nixFuncDefsenv)
@@ -221,7 +217,7 @@ inferFunc (L.Func{..}) env@(Env{..})
 
     addArgs :: [(T.Text, L.Type)] -> Env -> Env
     addArgs [] table = table
-    addArgs ((i, t) : xs) e@(Env{envConsts=cenv}) = addArgs xs $ e{envConsts=M.insert i t cenv}-- args are constant by default
+    addArgs ((i, t) : xs) e@(Env{envConsts=cenv}) = addArgs xs $ e{envConsts=M.insert i t cenv} -- args are constant by default
 
     evaluateFuncBody :: [L.SExpr] -> Env -> ([Either [E.SemErr] L.Type], Env, [T.Text], [T.Text], [T.Text])
     evaluateFuncBody sexprs t = go sexprs t [] [] [] []

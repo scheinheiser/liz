@@ -32,6 +32,9 @@ unsupportedDeclaration = customFailure . E.UnsupportedDeclaration
 inferredUndefined :: Parser a
 inferredUndefined = customFailure E.InferredUndefined
 
+invalidNumber :: T.Text -> Parser a
+invalidNumber = customFailure . E.InvalidNumber
+
 -- helper parsing functions
 getCurrentPos :: Parser (Pos, Pos) 
 getCurrentPos = getSourcePos >>= \p -> pure (sourceLine p, sourceColumn p)
@@ -110,11 +113,16 @@ parseChar = do
 parseNum :: Parser (LizPos -> LizPos -> SExpr)
 parseNum = do
   n <- (takeWhile1P @_ @T.Text (Just "digits 0-9 or '.'") valid) <* notFollowedBy letterChar
-  if '.' `T.elem` n then pure $ SELiteral Float' n
-                    else pure $ SELiteral Int' n
+  case () of _
+              | count '.' n == 1 -> pure $ SELiteral Float' n
+              | count '.' n == 0 -> pure $ SELiteral Int' n
+              | otherwise -> invalidNumber n
   where
     valid :: Char -> Bool
     valid = liftA2 (||) isDigit ('.' ==) 
+
+    count :: Char -> T.Text -> Int
+    count c = T.length . T.filter (c ==)
 
 parseBool :: Parser T.Text
 parseBool = string "True" <|> string "False"

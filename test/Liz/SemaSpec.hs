@@ -208,7 +208,7 @@ spec = do
     describe "Function declarations" $ do
       it "Check a function that returns nothing, and has no args." $ do
         let func = """
-          (func does_nothing [] > Unit
+          (def does_nothing [] > Unit
           \&  (return ()))\
           \"""
         let parsed = parse P.parseSExpr "" func
@@ -225,7 +225,7 @@ spec = do
 
       it "Check a function that returns something, and has no args" $ do
         let func = """
-          (func does_something [] > String
+          (def does_something [] > String
           \&  (const something "just did something!")
           \&  (print something)
           \&  (return something))\
@@ -248,7 +248,7 @@ spec = do
 
       it "Check a function that doesn't return anything, but has args" $ do
         let func = """
-          (func increment_and_print [n ~ Int] > Unit 
+          (def increment_and_print [n ~ Int] > Unit 
           \&  (print (+ 1 n))
           \&  (return ()))\
         \"""
@@ -268,7 +268,7 @@ spec = do
 
       it "Check a function that returns something, and has args" $ do
         let func = """
-          (func flip [b ~ Bool] > Bool 
+          (def flip [b ~ Bool] > Bool 
           \&  (return (not b)))\
         \"""
         let parsed = parse P.parseSExpr "" func
@@ -285,7 +285,7 @@ spec = do
 
       it "Fail checking a function that returns a different type than expected" $ do
         let func = """
-          (func decrement [number ~ Int] > Bool
+          (def decrement [number ~ Int] > Bool
           \&  (return (- number 1)))\
         \"""
         let parsed = parse P.parseSExpr "" func
@@ -294,7 +294,7 @@ spec = do
 
       it "Fail checking a function with an erroneous sexpr within" $ do
         let func = """
-          (func does_something [] > String
+          (def does_something [] > String
           \&  (const something String 40)
           \&  (print something)
           \&  (return something))\
@@ -305,7 +305,7 @@ spec = do
     describe "Function calls" $ do
       it "Check a function call with the correct amount of args" $ do
         let input = """
-          (func concat [s1 ~ String, s2 ~ String] > String
+          (def concat [s1 ~ String, s2 ~ String] > String
           \&  (return (++ s1 s2)))
           (concat "hello " "world")\
           \"""
@@ -327,7 +327,7 @@ spec = do
 
       it "Fail to check a function call with too many args" $ do
         let input = """
-          (func concat [s1 ~ String, s2 ~ String] > String
+          (def concat [s1 ~ String, s2 ~ String] > String
           \&  (return (++ s1 s2)))
           (concat "hello " "world" 50 10)\
           \"""
@@ -337,7 +337,7 @@ spec = do
 
       it "Fail to check a function call with too little args" $ do
         let input = """
-          (func concat [s1 ~ String, s2 ~ String] > String
+          (def concat [s1 ~ String, s2 ~ String] > String
           \&  (return (++ s1 s2)))
           (concat "won't work...")\
           \"""
@@ -347,7 +347,7 @@ spec = do
 
       it "Fail to check a function call with incorrect arg types" $ do
         let input = """
-          (func concat [s1 ~ String, s2 ~ String] > String
+          (def concat [s1 ~ String, s2 ~ String] > String
           \&  (return (++ s1 s2)))
           (concat True False)\
           \"""

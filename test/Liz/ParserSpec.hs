@@ -121,7 +121,7 @@ spec = do
     describe "Function declarations" $ do
       it "parse a function that returns nothing." $ do
         let func = """
-          (func does_nothing [] > Unit
+          (def does_nothing [] > Unit
           \&  (return ()))\
           \"""
         parse P.parseSExpr "" func `shouldParse` (L.SEFunc L.Func {
@@ -135,7 +135,7 @@ spec = do
 
       it "parse a function that returns a value." $ do
         let func = """
-          (func does_something [] > String
+          (def does_something [] > String
           \&  (const something "just did something!")
           \&  (print something)
           \&  (return something))\
@@ -155,7 +155,7 @@ spec = do
 
       it "parse a function with args that returns nothing." $ do
         let func = """
-          (func increment_and_print [n ~ Int] > Unit 
+          (def increment_and_print [n ~ Int] > Unit 
           \&  (print (+ 1 n))
           \&  (return ()))\
           \"""
@@ -172,7 +172,7 @@ spec = do
 
       it "parse a function with args that returns a value." $ do
         let func = """
-          (func flip [b ~ Bool] > Bool 
+          (def flip [b ~ Bool] > Bool 
           \&  (return (not b)))\
          \"""
         parse P.parseSExpr "" func `shouldParse` (L.SEFunc L.Func {

@@ -41,7 +41,7 @@ getCurrentPos = getSourcePos >>= \p -> pure (sourceLine p, sourceColumn p)
 
 lizReserved :: [T.Text]
 lizReserved = 
-  [ "var", "set", "const", "if", "func", "return", "False",
+  [ "var", "set", "const", "if", "def", "return", "False",
     "True", "undefined", "not", "negate", "Int", "Float", 
     "String", "Char", "Bool", "Unit", "print" ]
 
@@ -226,11 +226,11 @@ parseBinary = do
       SEBinary Less <$ string "<"
 
 {-
-  (func *ident* *args* *return type* *body*)
-    (func flip [b ~ Bool] > Bool 
+  (def *ident* *args* *return type* *body*)
+    (def flip [b ~ Bool] > Bool 
      (not b))
 
-    (func say_hi [name ~ String] > Unit
+    (def say_hi [name ~ String] > Unit
      (const with_hello String (++ "hello " name))
      (print with_hello)
      (return ())
@@ -238,7 +238,7 @@ parseBinary = do
 parseFuncDecl :: Parser SExpr
 parseFuncDecl = do
    s <- getCurrentPos
-   _ <- string "func"
+   _ <- string "def"
    hspace1
    ident <- parseIdent
    hspace1

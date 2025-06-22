@@ -1,28 +1,28 @@
 ; Liz
 ; This is a comment.
 
-; (func *ident* *args* *return type* *body*)
-(func increment [number ~ Int] > Int
+; (def *ident* *args* *return type* *body*)
+(def increment [number ~ Int] > Int
  (return (+ number 1))) ; explicit returns (for now)
 
-(func decrement [number ~ Int] > Int
+(def decrement [number ~ Int] > Int
  (return (- number 1)))
 
-(func flip [b ~ Bool] > Bool 
+(def flip [b ~ Bool] > Bool 
  (return (not b)))
 
-(func say_hi [name ~ String] > Unit
+(def say_hi [name ~ String] > Unit
  (const with_hello String (++ "hello " name))
  (print with_hello)
  (return ())) ; you can have an explicit return for variables.
 
-(func concat [s1 ~ String, s2 ~ String] > String
+(def concat [s1 ~ String, s2 ~ String] > String
  (return (++ s1 s2)))
 
-(func do_nothing [] > Unit
+(def do_nothing [] > Unit
  (return ()))
 
-(func main [] > Unit
+(def main [] > Unit
   ; (var *ident* *optional type* *value*)
   (var four 4) ; inferred Int
   (var hello String "World")

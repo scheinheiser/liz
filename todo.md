@@ -4,6 +4,9 @@
 - [x] Parse nested expressions.
 - [x] Basic type inference.
 - [x] Parse more complex expressions, like `func` and function calls.
+- [x] Change `func` to `def`
+- [ ] Add syntax to define custom operators (maybe (def (<$>) [...] (...)) ?)
+- [ ] Add `block` keyword for a block of expressions.
 
 ## Semantic Analysis
 - [x] Check that there's a `main` func, check that variables outside have the global tag? Up for change, really. (main checking is implemented)

@@ -5,7 +5,7 @@
 - [x] Basic type inference.
 - [x] Parse more complex expressions, like `func` and function calls.
 - [x] Change `func` to `def`
-- [ ] Add syntax to define custom operators (maybe (def (<$>) [...] (...)) ?)
+- [ ] Add syntax to define custom operators (maybe `(def (<$>) [...] (...)) ?)
 - [ ] Add `block` keyword for a block of expressions.
 
 ## Semantic Analysis
@@ -21,3 +21,6 @@
 ## Codegen
 - [x] Decide between using LLVM or asm for IR. (using QBE instead)
 - [ ] Make a QBE pretty printing library.
+- [ ] Compile simple expressions (i.e. arithmetic, boolean stuff).
+- [ ] Compile complex expressions (i.e. nested stuff, functions).
+- [ ] Compile and run the first working liz executable!

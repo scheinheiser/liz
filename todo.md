@@ -5,7 +5,7 @@
 - [x] Basic type inference.
 - [x] Parse more complex expressions, like `func` and function calls.
 - [x] Change `func` to `def`
-- [ ] Add syntax to define custom operators (maybe `(def (<$>) [...] (...)) ?)
+- [ ] Add syntax to define custom operators (maybe `(def (<$>) [...] (...))` ?)
 - [ ] Add `block` keyword for a block of expressions.
 
 ## Semantic Analysis
@@ -15,11 +15,16 @@
 - [x] Function calls (arg checking, correct no. of args).
 - [x] Type checking.
 - [x] Pretty errors.
-- [x] Tests for everything
 - [ ] Allow declarations in any order.
 
+## IR
+- [ ] Decide on block-style or label-style IR.
+- [ ] Translate simple `SExpr` constructs to IR (arithmetic, assignment, etc).
+- [ ] Translate complex `SExpr` constructs to IR (functions, etc).
+- [ ] Implement constant propagation/folding.
+
 ## Codegen
-- [x] Decide between using LLVM or asm for IR. (using QBE instead)
+- [x] Decide between using LLVM or asm for IL. (using QBE instead)
 - [ ] Make a QBE pretty printing library.
 - [ ] Compile simple expressions (i.e. arithmetic, boolean stuff).
 - [ ] Compile complex expressions (i.e. nested stuff, functions).

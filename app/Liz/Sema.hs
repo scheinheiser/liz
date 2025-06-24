@@ -5,7 +5,7 @@
 
 module Liz.Sema where
 
-import qualified Liz.Common.Error as E
+import qualified Liz.Common.Errors as E
 import qualified Liz.Common.Types as L
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -39,7 +39,7 @@ collectErrors (x : xs) errs types =
 testing :: L.Program -> FilePath -> IO ()
 testing (L.Program prog) f = do
   let
-    (res, hasMain) = aux prog mkEnv False []
+    (res, hasMain) = aux (filter (L.SEComment ==) prog) mkEnv False []
     (errs, _) = collectErrors res [] []
   case () of _
               | length errs /= 0 && not hasMain -> E.printErrs f (E.NoEntrypoint : errs) []

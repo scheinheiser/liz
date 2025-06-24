@@ -2,7 +2,7 @@
 {-# LANGUAGE NamedDefaults #-}
 {-# LANGUAGE LambdaCase #-}
 
-module Liz.Common.Error where
+module Liz.Common.Errors where
 
 import qualified Data.Text as T
 import qualified Text.Colour as C

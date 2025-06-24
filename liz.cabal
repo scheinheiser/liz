@@ -16,9 +16,10 @@ executable liz
     main-is:          Main.hs
     other-modules: Liz.Parser
       , Liz.Common.Types
-      , Liz.Common.Error
+      , Liz.Common.Errors
       , Liz.Sema
       , Liz.Codegen
+      , Liz.IR
     other-extensions: OverloadedStrings
       , NamedDefaults
       , RecordWildCards
@@ -39,8 +40,9 @@ test-suite liz-test
       , Liz.ParserSpec
       , Liz.Sema
       , Liz.Codegen
+      , Liz.IR
       , Liz.SemaSpec
-      , Liz.Common.Error
+      , Liz.Common.Errors
       , Liz.Common.Types
     other-extensions: OverloadedStrings, MultilineStrings
     type:             exitcode-stdio-1.0

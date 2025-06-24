@@ -4,7 +4,7 @@
 
 module Liz.Parser where
 
-import qualified Liz.Common.Error as E
+import qualified Liz.Common.Errors as E
 import qualified Data.Text as T
 import Liz.Common.Types
 

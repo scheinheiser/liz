@@ -28,6 +28,18 @@ combineEnv (Env {envFuncs=symF1, envVars=symV1, envConsts=symC1}) (Env {envFuncs
     envConsts = symC1 `M.union` symC2
   in Env {envFuncs, envVars, envConsts}
 
+evaluateBody :: [L.SExpr] -> Env -> ([Either [E.SemErr] L.Type], Env, [T.Text], [T.Text], [T.Text])
+evaluateBody sexprs t = go sexprs t [] [] [] []
+  where
+    go [] table acc varIdents constIdents funcIdents = (acc, table, varIdents, constIdents, funcIdents)
+    go (x : xs) table acc varIdents constIdents funcIdents = 
+      let (res, nt) = infer x table 
+      in case x of
+        (L.SEVar _ _ L.Var{varIdent=i}) -> go xs nt (res : acc) (i : varIdents) constIdents funcIdents
+        (L.SEConst _ _ L.Var{varIdent=i}) -> go xs nt (res : acc) varIdents (i : constIdents) funcIdents
+        (L.SEFunc L.Func{funcIdent=i}) -> go xs nt (res : acc) varIdents constIdents (i : funcIdents)
+        _ -> go xs nt (res : acc) varIdents constIdents funcIdents
+
 collectErrors :: [Either [E.SemErr] L.Type] -> [E.SemErr] -> [L.Type] -> ([E.SemErr], [L.Type])
 collectErrors [] errs types = (errs, types)
 collectErrors (x : xs) errs types =
@@ -96,6 +108,7 @@ infer (L.SESet s e i v) env = inferSet s e i v env
 infer (L.SEReturn _ _ v) env = infer v env
 infer (L.SEPrint _ _ _) env = (Right L.Unit', env)
 infer (L.SEFunc f) env = inferFunc f env
+infer (L.SEBlockStmt s e body) env = inferBlock s e body env
 infer (L.SEFuncCall s e iden args) env = inferFuncCall s e iden args env
 infer L.SEComment env = (Right L.String', env)
 infer s env = (Left [E.NotImplemented s], env)
@@ -133,6 +146,7 @@ inferUnary s e op v env =
 inferBinary :: L.LizPos -> L.LizPos -> L.BinaryOp -> L.SExpr -> L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
 inferBinary s e op l r env =
   case (infer l env, infer r env) of
+    ((Left el, nenv), (Left er, _)) -> (Left $ el <> er, nenv)
     (err@(Left _, _), _) -> err
     (_, err@(Left _, _)) -> err
     ((Right leftType, nenv), (Right rightType, _)) -> (aux op leftType rightType, nenv) -- can't define stuff in binary sexprs
@@ -197,40 +211,43 @@ inferFunc (L.Func{..}) env@(Env{..})
   | otherwise =
     let
       envWithArgs = flip addArgs env $ map (\L.Arg{..} -> (argIdent, argType)) funcArgs
-      (result, nenv, vis, cis, fis) = evaluateFuncBody funcBody envWithArgs
+      (result, nenv, vis, cis, fis) = evaluateBody funcBody envWithArgs
       errsAndTypes = collectErrors result [] []
     in aux (map L.argIdent funcArgs) vis cis fis errsAndTypes funcReturnType nenv
   where
     aux argIdents vis cis fis (errs, types) ret table@(Env {envConsts=constMap, envVars=varMap, envFuncs=funcMap}) =
       let
-        -- removing anything declared within the function from the table.
+        -- removing anything declared within the function from the environment.
         nixConsts = foldl' (flip M.delete) constMap (argIdents <> cis)
         nixVars = foldl' (flip M.delete) varMap vis
         nixFuncs = foldl' (flip M.delete) funcMap fis
-        nixFuncDefsenv = table{envConsts=nixConsts, envVars=nixVars, envFuncs=nixFuncs}
+        nixFuncDefsEnv = table{envConsts=nixConsts, envVars=nixVars, envFuncs=nixFuncs}
       in 
       case () of _
-                  | last types /= ret -> (Left $ [E.IncorrectType funcStart funcEnd ret (last types)], nixFuncDefsenv)
-                  | length errs /= 0 -> (Left errs, nixFuncDefsenv)
+                  | last types /= ret -> (Left $ [E.IncorrectType funcStart funcEnd ret (last types)], nixFuncDefsEnv)
+                  | length errs /= 0 -> (Left errs, nixFuncDefsEnv)
                   | otherwise -> 
                       let newFuncMap = M.insert funcIdent (funcReturnType, (map L.argType funcArgs)) (nixFuncs)
-                      in (Right ret, nixFuncDefsenv{envFuncs=newFuncMap})
+                      in (Right ret, nixFuncDefsEnv{envFuncs=newFuncMap})
 
     addArgs :: [(T.Text, L.Type)] -> Env -> Env
     addArgs [] table = table
     addArgs ((i, t) : xs) e@(Env{envConsts=cenv}) = addArgs xs $ e{envConsts=M.insert i t cenv} -- args are constant by default
 
-    evaluateFuncBody :: [L.SExpr] -> Env -> ([Either [E.SemErr] L.Type], Env, [T.Text], [T.Text], [T.Text])
-    evaluateFuncBody sexprs t = go sexprs t [] [] [] []
-      where
-        go [] table acc varIdents constIdents funcIdents = (acc, table, varIdents, constIdents, funcIdents)
-        go (x : xs) table acc varIdents constIdents funcIdents = 
-          let (res, nt) = infer x table 
-          in case x of
-            (L.SEVar _ _ L.Var{varIdent=i}) -> go xs nt (res : acc) (i : varIdents) constIdents funcIdents
-            (L.SEConst _ _ L.Var{varIdent=i}) -> go xs nt (res : acc) varIdents (i : constIdents) funcIdents
-            (L.SEFunc L.Func{funcIdent=i}) -> go xs nt (res : acc) varIdents constIdents (i : funcIdents)
-            _ -> go xs nt (res : acc) varIdents constIdents funcIdents
+inferBlock :: L.LizPos -> L.LizPos -> [L.SExpr] -> Env -> (Either [E.SemErr] L.Type, Env)
+inferBlock s e body env@(Env{..}) =
+  let 
+    (result, nenv, vis, cis, fis) = evaluateBody body env
+    (errs, types) = collectErrors result [] []
+
+    -- removing anything declared within the body from the environment.
+    nixConsts = foldl' (flip M.delete) envConsts cis
+    nixVars = foldl' (flip M.delete) envVars vis
+    nixFuncs = foldl' (flip M.delete) envFuncs fis
+    nixBodyDefs = nenv{envConsts=nixConsts, envVars=nixVars, envFuncs=nixFuncs}
+  in
+  if length errs /= 0 then (Left errs, nixBodyDefs)
+                      else (Right $ last types, nixBodyDefs)
 
 inferFuncCall :: L.LizPos -> L.LizPos -> T.Text -> [L.SExpr] -> Env -> (Either [E.SemErr] L.Type, Env)
 inferFuncCall s e ident sexprs env@(Env{..})
@@ -258,3 +275,22 @@ inferFuncCall s e ident sexprs env@(Env{..})
     findWrongTypes [] _ = []
     findWrongTypes (x : xs) ys | not $ x `elem` ys = x : findWrongTypes xs ys
                                | otherwise = findWrongTypes xs ys
+
+  -- | SEIfStmt    LizPos LizPos SExpr SExpr (Maybe SExpr) -- cond - truebranch - optional falsebranch
+inferIfStmt :: L.LizPos -> L.LizPos -> L.SExpr -> L.SExpr -> Maybe L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
+inferIfStmt s e cond tbranch Nothing env =
+  case (infer cond env, infer tbranch env) of
+    ((Left ecs, _), (Left ets, nenv)) -> (Left $ ecs <> ets, nenv)
+    (err@((Left _), _), _) -> err
+    (_, err@(Left _, _)) -> err
+    ((Right tccond, _), (Right tctbr, nenv)) | tccond /= L.Bool' -> (Left [E.IncorrectType s e L.Bool' tccond], nenv)
+                                             | otherwise -> (Right tctbr, nenv)
+inferIfStmt s e cond tbranch (Just fbranch) env =
+  case (infer cond env, infer tbranch env, infer fbranch env) of
+    ((Left ecs, _), (Left ets, _), (Left efs, nenv)) -> (Left $ ecs <> ets <> efs, nenv)
+    (err@((Left _), _), _, _) -> err
+    (_, err@(Left _, _), _) -> err
+    (_, _, err@(Left _, _)) -> err
+    ((Right tccond, _), (Right tctbr, _), (Right tcfbr, nenv)) | tccond /= L.Bool' -> (Left [E.IncorrectType s e L.Bool' tccond], nenv)
+                                                               | tctbr /= tcfbr -> (Left [E.IncorrectType s e tctbr tcfbr], nenv)
+                                                               | otherwise -> (Right tcfbr, nenv)

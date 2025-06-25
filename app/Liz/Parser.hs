@@ -9,7 +9,7 @@ import qualified Data.Text as T
 import Liz.Common.Types
 
 import Data.String ( IsString (..))
-import Data.Char (isAlphaNum, isDigit, isPrint)
+import Data.Char (isAlphaNum, isDigit, isPrint, isSymbol, isPunctuation)
 import Control.Monad (void, liftM)
 
 import Text.Megaparsec hiding (count)
@@ -47,7 +47,8 @@ lizReserved =
   [ "var", "set", "const", "if", "def", "return", "False",
     "True", "undefined", "not", "negate", "Int", "Float", 
     "String", "Char", "Bool", "Unit", "print", "block",
-    "if"]
+    "++", "==", "!=", "+", "-", "*", "/", ">=", "<=", ">",
+    "<"]
 
 parseType :: Parser Type
 parseType =
@@ -244,7 +245,7 @@ parseFuncDecl = do
    s <- getCurrentPos
    _ <- string "def"
    hspace1
-   ident <- parseIdent
+   ident <- parseIdent <|> parseOpId
    hspace1
    args <- parseFuncArgs
    hidden hspace
@@ -256,27 +257,34 @@ parseFuncDecl = do
    e <- getCurrentPos
    pure $ SEFunc Func {funcIdent = ident, funcStart = s, funcEnd = e, funcArgs = args, funcReturnType = retTy, funcBody = block}
    where
-     scn :: Parser ()
-     scn = L.space space1 (void $ spaceChar <|> tab) empty
+    scn :: Parser ()
+    scn = L.space space1 (void $ spaceChar <|> tab) empty
 
-     parseFuncArgs :: Parser [Arg]
-     parseFuncArgs = between (char '[') (char ']') $ aux `sepBy` char ','
-       where
-         aux :: Parser Arg
-         aux = do
-           hidden hspace
-           ident <- parseIdent
-           hidden hspace
-           _ <- char '~'
-           hidden hspace
-           ty <- parseType
-           pure Arg {argIdent = ident, argType = ty}
+    parseOpId :: Parser T.Text
+    parseOpId = do
+      _ <- char '('
+      op <- liftM T.pack $ some symbolChar
+      _ <- char ')'
+      if op `elem` lizReserved then reservedIdent op
+                               else pure op
+
+    parseFuncArgs :: Parser [Arg]
+    parseFuncArgs = between (char '[') (char ']') $ aux `sepBy` char ','
+      where
+       aux :: Parser Arg
+       aux = do
+         hidden hspace
+         ident <- parseIdent
+         hidden hspace
+         _ <- char '~'
+         hidden hspace
+         ty <- parseType
+         pure Arg {argIdent = ident, argType = ty}
 
 parseFuncCall :: Parser SExpr
 parseFuncCall = do
   s <- getCurrentPos
-  hspace1
-  ident <- parseIdent
+  ident <- parseOpId <|> parseIdent
   hspace1
   args <- parseCallArgs
   e <- getCurrentPos
@@ -285,11 +293,14 @@ parseFuncCall = do
     parseCallArgs :: Parser [SExpr]
     parseCallArgs = parseNested `sepBy` char ' '
 
+    parseOpId :: Parser T.Text
+    parseOpId = liftM T.pack $ some symbolChar
+
 parseBlock :: Parser SExpr
 parseBlock = do
   s <- getCurrentPos
   _ <- string "block"
-  hspace1
+  hspace
   block <- some $ L.lineFold scn $ \_ -> parseSExpr
   e <- getCurrentPos
   pure $ SEBlockStmt s e block
@@ -302,15 +313,15 @@ parseIfStmt :: Parser SExpr
 parseIfStmt = do
   s <- getCurrentPos
   _ <- string "if"
-  hspace1
+  hspace
   cond <- parseSExpr
-  hspace1
+  hspace
   block <- some $ L.lineFold scn $ \_ -> parseSExpr
   e <- getCurrentPos
   case () of _
               | length block > 2 -> tooManyExprsIf
               | length block == 1 -> pure $ SEIfStmt s e cond (head block) Nothing -- using head since the list can't be empty.
-              | length block == 2 ->
+              | otherwise ->
                 let [truebr, falsebr] = block in
                 pure $ SEIfStmt s e cond truebr (Just falsebr)
   where
@@ -321,14 +332,14 @@ parseSExpr :: Parser SExpr
 parseSExpr = (between (char '(') (char ')') $ 
   label "valid S-Expression" 
     (choice [parseFuncDecl
-            , parseBlock
-            , parseIfStmt
             , parseBinary
             , parseUnary
             , parseVarDecl
             , parseSetStmt
+            , parseIfStmt
             , parseRet
             , parsePrint
+            , parseBlock
             , parseFuncCall
             ])) <|> parseComment
 

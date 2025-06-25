@@ -9,7 +9,7 @@ import Data.Map (insert)
 
 import qualified Liz.Parser as P
 import qualified Liz.Common.Types as L
-import qualified Liz.Common.Error as E
+import qualified Liz.Common.Errors as E
 import qualified Liz.Sema as S
 
 -- convenience and helper functions
@@ -338,13 +338,13 @@ spec = do
 
       it "Fail to check a function call with too little args" $ do
         let input = """
-          (def concat [s1 ~ String, s2 ~ String] > String
+          (def (<>) [s1 ~ String, s2 ~ String] > String
           \&  (return (++ s1 s2)))
-          (concat "won't work...")\
+          (<> "won't work...")\
           \"""
         let parsed = P.parseFile "" input
         let output = getOutput parsed
-        (analyseProgram output) `shouldBe` (Left [E.NotEnoughArgs (mkPos 3, mkPos 2) (mkPos 3, mkPos 24) "concat" 1])
+        (analyseProgram output) `shouldBe` (Left [E.NotEnoughArgs (mkPos 3, mkPos 2) (mkPos 3, mkPos 24) "+++" 1])
 
       it "Fail to check a function call with incorrect arg types" $ do
         let input = """

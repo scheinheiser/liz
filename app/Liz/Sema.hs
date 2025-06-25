@@ -276,7 +276,6 @@ inferFuncCall s e ident sexprs env@(Env{..})
     findWrongTypes (x : xs) ys | not $ x `elem` ys = x : findWrongTypes xs ys
                                | otherwise = findWrongTypes xs ys
 
-  -- | SEIfStmt    LizPos LizPos SExpr SExpr (Maybe SExpr) -- cond - truebranch - optional falsebranch
 inferIfStmt :: L.LizPos -> L.LizPos -> L.SExpr -> L.SExpr -> Maybe L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
 inferIfStmt s e cond tbranch Nothing env =
   case (infer cond env, infer tbranch env) of

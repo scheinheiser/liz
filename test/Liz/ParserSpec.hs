@@ -118,7 +118,7 @@ spec = do
         -- parse P.parseSExpr "" `shouldFailOn` "(const this_wont_work undefined)"
         parse P.parseSExpr "" "(const inferred_undef undefined)" `shouldParse` L.SEConst (mkPos 1, mkPos 2) (mkPos 1, mkPos 32) (L.Var {varIdent = "inferred_undef", varType = L.Undef', varValue = L.SELiteral L.Undef' "undefined" (mkPos 1, mkPos 23) (mkPos 1, mkPos 32)})
 
-  describe "Function parsing" $ do
+  describe "Expression parsing" $ do
     describe "Function declarations" $ do
       it "parse a function that returns nothing." $ do
         let func = """
@@ -191,3 +191,43 @@ spec = do
 
       it "parse a function call w/ a nested expression" $ do
         parse P.parseSExpr "" "(flip (== 10 5))" `shouldParse` (L.SEFuncCall base (mkPos 1, mkPos 16) "flip" [(L.SEBinary L.Eql (mkPos 1, mkPos 8) (mkPos 1, mkPos 15) (L.SELiteral L.Int' "10" (mkPos 1, mkPos 11) (mkPos 1, mkPos 13)) (L.SELiteral L.Int' "5" (mkPos 1, mkPos 14) (mkPos 1, mkPos 15)))])
+
+    describe "Block Statement" $ do
+      it "parse a block statement" $ do
+        let block = """
+          (block
+          \&  (const something "just did something!")
+          \&  (print something)
+          \&  (return something))\
+          \"""
+        parse P.parseSExpr "" block `shouldParse` (L.SEBlockStmt 
+          (mkPos 1, mkPos 2) 
+          (mkPos 4, mkPos 21) 
+          [(L.SEConst (mkPos 2, mkPos 4) (mkPos 2, mkPos 41) L.Var{varIdent = "something", varType = L.String', varValue = L.SELiteral L.String' "\"just did something!\"" (mkPos 2, mkPos 20) (mkPos 2, mkPos 41)})
+            ,(L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 19) (L.SEIdentifier "something" (mkPos 3, mkPos 10) (mkPos 3, mkPos 19)))
+            ,(L.SEReturn (mkPos 4, mkPos 4) (mkPos 4, mkPos 20)(L.SEIdentifier "something" (mkPos 4, mkPos 11) (mkPos 4, mkPos 20)))])
+
+    describe "If Statement" $ do
+      it "parse an if statement without an else branch" $ do
+        let ifstmt = """
+          (if (> 10 5)
+          \&  (print "10 is greater than 5"))\
+          \"""
+        parse P.parseSExpr "" ifstmt `shouldParse` (L.SEIfStmt
+          (mkPos 1, mkPos 2)
+          (mkPos 2, mkPos 33) 
+          (L.SEBinary L.Greater (mkPos 1, mkPos 6) (mkPos 1, mkPos 12) (L.SELiteral L.Int' "10" (mkPos 1, mkPos 8) (mkPos 1, mkPos 10)) (L.SELiteral L.Int' "5" (mkPos 1, mkPos 11) (mkPos 1, mkPos 12)))
+          (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 32) (L.SELiteral L.String' "\"10 is greater than 5\"" (mkPos 2, mkPos 10) (mkPos 2, mkPos 32)))
+          Nothing)
+      it "parse an if statement with an else branch" $ do
+        let ifstmt = """
+          (if (> 10 5)
+          \&  (print "10 is greater than 5")
+          \&  (print "10 isn't greater than 5"))\
+          \"""
+        parse P.parseSExpr "" ifstmt `shouldParse` (L.SEIfStmt
+          (mkPos 1, mkPos 2)
+          (mkPos 3, mkPos 36) 
+          (L.SEBinary L.Greater (mkPos 1, mkPos 6) (mkPos 1, mkPos 12) (L.SELiteral L.Int' "10" (mkPos 1, mkPos 8) (mkPos 1, mkPos 10)) (L.SELiteral L.Int' "5" (mkPos 1, mkPos 11) (mkPos 1, mkPos 12)))
+          (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 32) (L.SELiteral L.String' "\"10 is greater than 5\"" (mkPos 2, mkPos 10) (mkPos 2, mkPos 32)))
+          (Just ((L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 35) (L.SELiteral L.String' "\"10 isn't greater than 5\"" (mkPos 3, mkPos 10) (mkPos 3, mkPos 35))))))

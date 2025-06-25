@@ -42,7 +42,3 @@
   (print (== 4 (decrement (increment 4)))) ; would print "True"
   ; (print with_hello)
   (return ()))
-
-(if (> 5 10)
-  (print "woo")
-  (print "ooh"))

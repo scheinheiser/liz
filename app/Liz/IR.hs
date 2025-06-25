@@ -17,6 +17,7 @@ data Lit = LBool Bool
   | LUndef
   deriving Show
 
+-- TODO: add 'goto' op when control flow is implemented
 data IROp = IRInt Int
   | IRBool Bool 
   | IRFloat Double
@@ -44,11 +45,13 @@ fromComp L.Eql = (==)
 
 fromArith :: Num a => L.BinaryOp -> (a -> a -> a)
 fromArith L.Multiply = (*)
-fromArith L.Divide = (/)
 fromArith L.Subtract = (-)
 fromArith L.Add = (+)
 
 -- main functions
+
+-- TODO: Do a TAC-style thing where each expr is allocated to a temp variable.
+-- Just accept some count for temp no.s, and allocate in binary/unary branch
 fromSExpr :: L.SExpr -> IROp
 fromSExpr (L.SELiteral ty lit _ _) =
   case ty of
@@ -85,10 +88,15 @@ fromSExpr (L.SEPrint _ _ v) = IRPrint $ fromSExpr v
 
 foldExpr :: IROp -> IROp
 foldExpr l@(IRInt _; IRFloat _; IRString _; IRChar _; IRBool _) = l
-foldExpr op@(IRBin p@(L.Add; L.Subtract; L.Divide; L.Mulitply) l r) =
+foldExpr op@(IRBin p@(L.Add; L.Subtract; L.Multiply) l r) =
   case (l, r) of
     (IRInt lop, IRInt rop) -> let arith = fromArith p in IRInt (arith lop rop)
     (IRFloat lop, IRFloat rop) -> let arith = fromArith p in IRFloat (arith lop rop)
+    _ -> op
+foldExpr op@(IRBin L.Divide l r) =
+  case (l, r) of
+    (IRInt lop, IRInt rop) -> IRInt (div lop rop)
+    (IRFloat lop, IRFloat rop) -> IRFloat (lop / rop)
     _ -> op
 foldExpr op@(IRBin p@(L.Greater; L.Less; L.LessEql; L.GreaterEql; L.NotEql; L.Eql) l r) =
   case (l, r) of

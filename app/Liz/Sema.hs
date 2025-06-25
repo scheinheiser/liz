@@ -84,6 +84,7 @@ analyseProgram p@(L.Program prog) =
         (res, next) = infer ex sym
       in aux exprs next hasMain (res : acc)
 
+-- TODO: typecheck blocks and if statements
 infer :: L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
 infer (L.SEIdentifier iden s e) env = inferIdentifier s e iden env
 infer (L.SELiteral ty _ _ _) env = (Right ty, env)

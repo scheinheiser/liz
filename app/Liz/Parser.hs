@@ -35,6 +35,9 @@ inferredUndefined = customFailure E.InferredUndefined
 invalidNumber :: T.Text -> Parser a
 invalidNumber = customFailure . E.InvalidNumber
 
+tooManyExprsIf :: Parser a
+tooManyExprsIf = customFailure E.TooManyExprsIf
+
 -- helper parsing functions
 getCurrentPos :: Parser (Pos, Pos) 
 getCurrentPos = getSourcePos >>= \p -> pure (sourceLine p, sourceColumn p)
@@ -43,7 +46,8 @@ lizReserved :: [T.Text]
 lizReserved = 
   [ "var", "set", "const", "if", "def", "return", "False",
     "True", "undefined", "not", "negate", "Int", "Float", 
-    "String", "Char", "Bool", "Unit", "print" ]
+    "String", "Char", "Bool", "Unit", "print", "block",
+    "if"]
 
 parseType :: Parser Type
 parseType =
@@ -271,6 +275,7 @@ parseFuncDecl = do
 parseFuncCall :: Parser SExpr
 parseFuncCall = do
   s <- getCurrentPos
+  hspace1
   ident <- parseIdent
   hspace1
   args <- parseCallArgs
@@ -280,10 +285,44 @@ parseFuncCall = do
     parseCallArgs :: Parser [SExpr]
     parseCallArgs = parseNested `sepBy` char ' '
 
+parseBlock :: Parser SExpr
+parseBlock = do
+  s <- getCurrentPos
+  _ <- string "block"
+  hspace1
+  block <- some $ L.lineFold scn $ \_ -> parseSExpr
+  e <- getCurrentPos
+  pure $ SEBlockStmt s e block
+  where
+    scn :: Parser ()
+    scn = L.space space1 (void $ spaceChar <|> tab) empty
+
+-- TODO: fix errors here (mainly with empty ifs)
+parseIfStmt :: Parser SExpr
+parseIfStmt = do
+  s <- getCurrentPos
+  _ <- string "if"
+  hspace1
+  cond <- parseSExpr
+  hspace1
+  block <- some $ L.lineFold scn $ \_ -> parseSExpr
+  e <- getCurrentPos
+  case () of _
+              | length block > 2 -> tooManyExprsIf
+              | length block == 1 -> pure $ SEIfStmt s e cond (head block) Nothing -- using head since the list can't be empty.
+              | length block == 2 ->
+                let [truebr, falsebr] = block in
+                pure $ SEIfStmt s e cond truebr (Just falsebr)
+  where
+    scn :: Parser ()
+    scn = L.space space1 (void $ spaceChar <|> tab) empty
+
 parseSExpr :: Parser SExpr
 parseSExpr = (between (char '(') (char ')') $ 
   label "valid S-Expression" 
     (choice [parseFuncDecl
+            , parseBlock
+            , parseIfStmt
             , parseBinary
             , parseUnary
             , parseVarDecl
@@ -304,10 +343,3 @@ parseFile f fc = do
   case (parse parseProgram f fc) of
     (Left err) -> Left err
     (Right v) -> Right $ Program v
-
-parseAndPP :: FilePath -> IO ()
-parseAndPP f = do
-  fc <- liftM T.pack $ readFile f
-  case (parse parseProgram f fc) of
-    (Left err) -> putStrLn $ errorBundlePretty err
-    (Right v) -> putStrLn $ foldMap show v

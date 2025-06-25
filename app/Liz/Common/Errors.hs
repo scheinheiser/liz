@@ -90,6 +90,7 @@ data PError = FailedTypeInference T.Text
   | UnsupportedDeclaration T.Text
   | InferredUndefined
   | InvalidNumber T.Text
+  | TooManyExprsIf
   deriving (Show, Eq, Ord)
 
 instance ShowErrorComponent PError where
@@ -99,3 +100,4 @@ instance ShowErrorComponent PError where
     UnsupportedDeclaration s -> printf "[ERROR] This type of declaration is currently not supported - '%s'" (T.unpack s)
     InferredUndefined ->        printf "[ERROR] Can't infer the type of undefined."
     InvalidNumber s ->          printf "[ERROR] The format of this number '%s' is invalid." (T.unpack s)
+    TooManyExprsIf ->           printf "[ERROR] There are too many expressions within this if statement."

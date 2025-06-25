@@ -13,6 +13,7 @@ import qualified Liz.Common.Types as L
 base :: (Pos, Pos)
 base = (mkPos 1, mkPos 2)
 
+-- TODO: tests for if/block parsing.
 spec :: Spec
 spec = do
   describe "Literal parsing" $ do

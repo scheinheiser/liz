@@ -71,6 +71,8 @@ data SExpr = SEIdentifier T.Text LizPos LizPos
   | SEComment
   | SEFunc      Func
   | SEFuncCall  LizPos LizPos T.Text [SExpr] -- ident - values
+  | SEBlockStmt LizPos LizPos [SExpr]
+  | SEIfStmt    LizPos LizPos SExpr SExpr (Maybe SExpr) -- cond - truebranch - optional falsebranch
   | SEReturn    LizPos LizPos SExpr
   | SEPrint     LizPos LizPos SExpr
   | SEType      Type

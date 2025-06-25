@@ -43,6 +43,7 @@ analyseProgram p@(L.Program prog) =
         (res, next) = S.infer ex sym
       in res : aux exprs next
 
+-- TODO: tests for if/block checking.
 spec :: Spec
 spec = do
   describe "Type checking" $ do

@@ -28,17 +28,9 @@ combineEnv (Env {envFuncs=symF1, envVars=symV1, envConsts=symC1}) (Env {envFuncs
     envConsts = symC1 `M.union` symC2
   in Env {envFuncs, envVars, envConsts}
 
-evaluateBody :: [L.SExpr] -> Env -> ([Either [E.SemErr] L.Type], Env, [T.Text], [T.Text], [T.Text])
-evaluateBody sexprs t = go sexprs t [] [] [] []
-  where
-    go [] table acc varIdents constIdents funcIdents = (acc, table, varIdents, constIdents, funcIdents)
-    go (x : xs) table acc varIdents constIdents funcIdents = 
-      let (res, nt) = infer x table 
-      in case x of
-        (L.SEVar _ _ L.Var{varIdent=i}) -> go xs nt (res : acc) (i : varIdents) constIdents funcIdents
-        (L.SEConst _ _ L.Var{varIdent=i}) -> go xs nt (res : acc) varIdents (i : constIdents) funcIdents
-        (L.SEFunc L.Func{funcIdent=i}) -> go xs nt (res : acc) varIdents constIdents (i : funcIdents)
-        _ -> go xs nt (res : acc) varIdents constIdents funcIdents
+evaluateBody :: [L.SExpr] -> Env -> [Either [E.SemErr] L.Type]
+evaluateBody [] _ = []
+evaluateBody (x : xs) env = let (res, nenv) = infer x env in res : evaluateBody xs nenv
 
 collectErrors :: [Either [E.SemErr] L.Type] -> [E.SemErr] -> [L.Type] -> ([E.SemErr], [L.Type])
 collectErrors [] errs types = (errs, types)
@@ -110,6 +102,7 @@ infer (L.SEPrint _ _ _) env = (Right L.Unit', env)
 infer (L.SEFunc f) env = inferFunc f env
 infer (L.SEBlockStmt s e body) env = inferBlock s e body env
 infer (L.SEFuncCall s e iden args) env = inferFuncCall s e iden args env
+infer (L.SEIfStmt s e cond tbr fbr) env = inferIfStmt s e cond tbr fbr env
 infer L.SEComment env = (Right L.String', env)
 infer s env = (Left [E.NotImplemented s], env)
 
@@ -211,43 +204,30 @@ inferFunc (L.Func{..}) env@(Env{..})
   | otherwise =
     let
       envWithArgs = flip addArgs env $ map (\L.Arg{..} -> (argIdent, argType)) funcArgs
-      (result, nenv, vis, cis, fis) = evaluateBody funcBody envWithArgs
+      result = evaluateBody funcBody envWithArgs -- the old env has none of definitions, so we discard the result
       errsAndTypes = collectErrors result [] []
-    in aux (map L.argIdent funcArgs) vis cis fis errsAndTypes funcReturnType nenv
+    in aux errsAndTypes funcReturnType
   where
-    aux argIdents vis cis fis (errs, types) ret table@(Env {envConsts=constMap, envVars=varMap, envFuncs=funcMap}) =
-      let
-        -- removing anything declared within the function from the environment.
-        nixConsts = foldl' (flip M.delete) constMap (argIdents <> cis)
-        nixVars = foldl' (flip M.delete) varMap vis
-        nixFuncs = foldl' (flip M.delete) funcMap fis
-        nixFuncDefsEnv = table{envConsts=nixConsts, envVars=nixVars, envFuncs=nixFuncs}
-      in 
+    aux (errs, types) ret =
       case () of _
-                  | last types /= ret -> (Left $ [E.IncorrectType funcStart funcEnd ret (last types)], nixFuncDefsEnv)
-                  | length errs /= 0 -> (Left errs, nixFuncDefsEnv)
+                  | length errs /= 0 -> (Left errs, env)
+                  | last types /= ret -> (Left $ [E.IncorrectType funcStart funcEnd ret (last types)], env)
                   | otherwise -> 
-                      let newFuncMap = M.insert funcIdent (funcReturnType, (map L.argType funcArgs)) (nixFuncs)
-                      in (Right ret, nixFuncDefsEnv{envFuncs=newFuncMap})
+                      let newFuncMap = M.insert funcIdent (funcReturnType, (map L.argType funcArgs)) (envFuncs)
+                      in (Right ret, env{envFuncs=newFuncMap})
 
     addArgs :: [(T.Text, L.Type)] -> Env -> Env
     addArgs [] table = table
     addArgs ((i, t) : xs) e@(Env{envConsts=cenv}) = addArgs xs $ e{envConsts=M.insert i t cenv} -- args are constant by default
 
 inferBlock :: L.LizPos -> L.LizPos -> [L.SExpr] -> Env -> (Either [E.SemErr] L.Type, Env)
-inferBlock s e body env@(Env{..}) =
+inferBlock s e body env =
   let 
-    (result, nenv, vis, cis, fis) = evaluateBody body env
+    result = evaluateBody body env
     (errs, types) = collectErrors result [] []
-
-    -- removing anything declared within the body from the environment.
-    nixConsts = foldl' (flip M.delete) envConsts cis
-    nixVars = foldl' (flip M.delete) envVars vis
-    nixFuncs = foldl' (flip M.delete) envFuncs fis
-    nixBodyDefs = nenv{envConsts=nixConsts, envVars=nixVars, envFuncs=nixFuncs}
   in
-  if length errs /= 0 then (Left errs, nixBodyDefs)
-                      else (Right $ last types, nixBodyDefs)
+  if length errs /= 0 then (Left errs, env)
+                      else (Right $ last types, env)
 
 inferFuncCall :: L.LizPos -> L.LizPos -> T.Text -> [L.SExpr] -> Env -> (Either [E.SemErr] L.Type, Env)
 inferFuncCall s e ident sexprs env@(Env{..})

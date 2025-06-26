@@ -344,7 +344,7 @@ spec = do
           \"""
         let parsed = P.parseFile "" input
         let output = getOutput parsed
-        (analyseProgram output) `shouldBe` (Left [E.NotEnoughArgs (mkPos 3, mkPos 2) (mkPos 3, mkPos 24) "+++" 1])
+        (analyseProgram output) `shouldBe` (Left [E.NotEnoughArgs (mkPos 3, mkPos 2) (mkPos 3, mkPos 20) "<>" 1])
 
       it "Fail to check a function call with incorrect arg types" $ do
         let input = """

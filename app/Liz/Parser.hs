@@ -9,7 +9,7 @@ import qualified Data.Text as T
 import Liz.Common.Types
 
 import Data.String ( IsString (..))
-import Data.Char (isAlphaNum, isDigit, isPrint, isSymbol, isPunctuation)
+import Data.Char (isAlphaNum, isDigit, isPrint) 
 import Control.Monad (void, liftM)
 
 import Text.Megaparsec hiding (count)
@@ -38,6 +38,9 @@ invalidNumber = customFailure . E.InvalidNumber
 tooManyExprsIf :: Parser a
 tooManyExprsIf = customFailure E.TooManyExprsIf
 
+wrongArgCount :: Int -> Int -> Parser a
+wrongArgCount ex got = customFailure $ E.WrongArgCount ex got
+
 -- helper parsing functions
 getCurrentPos :: Parser (Pos, Pos) 
 getCurrentPos = getSourcePos >>= \p -> pure (sourceLine p, sourceColumn p)
@@ -46,9 +49,14 @@ lizReserved :: [T.Text]
 lizReserved = 
   [ "var", "set", "const", "if", "def", "return", "False",
     "True", "undefined", "not", "negate", "Int", "Float", 
-    "String", "Char", "Bool", "Unit", "print", "block",
-    "++", "==", "!=", "+", "-", "*", "/", ">=", "<=", ">",
-    "<"]
+    "String", "Char", "Bool", "Unit", "print", "block"]
+
+lizSymbols :: Parser Char
+lizSymbols = choice
+  [char '*', char '/', char '-', char '=', char '+', char '<',
+   char '>', char '?', char '.', char '^', char '%', char '$',
+   char '#', char '£', char '@', char '!', char '\\', char ',',
+   char '~']
 
 parseType :: Parser Type
 parseType =
@@ -73,19 +81,19 @@ parseNested :: Parser SExpr
 parseNested = do
   s <- getCurrentPos
   v <- (do
-    value <- parseValue <|> (SEIdentifier <$> parseIdent)
+    value <- parseValue <|> (SEIdentifier <$> parseIdent True)
     e <- getCurrentPos
     pure $ value s e) <|> parseSExpr
   pure v
 
 -- main parsing functions
-parseIdent :: Parser T.Text
-parseIdent = do
+parseIdent :: Bool -> Parser T.Text
+parseIdent flag = do
   s <- letterChar
   r <- takeWhileP (Just "alphanumeric character or '_'") valid
   let ident = T.pack [s] <> r
 
-  if ident `elem` lizReserved
+  if ident `elem` lizReserved && flag
   then reservedIdent ident
   else pure $ ident
   where
@@ -169,7 +177,7 @@ parseVarDecl = do
   s <- getCurrentPos
   decType <- SEVar s <$ string "var" <|> SEConst s <$ string "const"
   hspace1
-  ident <- parseIdent
+  ident <- parseIdent True
   hspace1 
   ty <- (liftM SEType parseType) <|> parseNested
   aux decType ident ty
@@ -189,46 +197,11 @@ parseSetStmt = do
   s <- getCurrentPos
   _ <- string "set"
   hspace1
-  ident <- parseIdent
+  ident <- parseIdent True
   hspace1
   value <- parseNested
   e <- getCurrentPos
   pure $ SESet s e ident value
-
-parseUnary :: Parser SExpr
-parseUnary = do
-  s <- getCurrentPos
-  op <- parseUnaryOp
-  hspace1
-  v <- parseNested
-  e <- getCurrentPos
-  pure $ op s e v
-  where
-  parseUnaryOp = SEUnary Not <$ string "not" <|> SEUnary Negate <$ string "negate"
-
-parseBinary :: Parser SExpr
-parseBinary = do
-  s <- getCurrentPos
-  op <- parseBinaryOp
-  hspace1
-  left <- parseNested
-  hspace1
-  right <- parseNested
-  e <- getCurrentPos
-  pure $ op s e left right
-  where
-    parseBinaryOp = 
-      SEBinary Concat <$ string "++" <|>
-      SEBinary Add <$ string "+" <|> 
-      SEBinary Subtract <$ string "-" <|> 
-      SEBinary Multiply <$ string "*" <|> 
-      SEBinary Divide <$ string "/" <|> 
-      SEBinary GreaterEql <$ string ">=" <|> 
-      SEBinary LessEql <$ string "<=" <|> 
-      SEBinary Eql <$ string "==" <|> 
-      SEBinary NotEql <$ string "!=" <|>
-      SEBinary Greater <$ string ">" <|> 
-      SEBinary Less <$ string "<"
 
 {-
   (def *ident* *args* *return type* *body*)
@@ -245,7 +218,7 @@ parseFuncDecl = do
    s <- getCurrentPos
    _ <- string "def"
    hspace1
-   ident <- parseIdent <|> parseOpId
+   ident <- (parseIdent True) <|> parseOpId
    hspace1
    args <- parseFuncArgs
    hidden hspace
@@ -263,7 +236,7 @@ parseFuncDecl = do
     parseOpId :: Parser T.Text
     parseOpId = do
       _ <- char '('
-      op <- liftM T.pack $ some symbolChar
+      op <- liftM T.pack $ some lizSymbols
       _ <- char ')'
       if op `elem` lizReserved then reservedIdent op
                                else pure op
@@ -274,27 +247,67 @@ parseFuncDecl = do
        aux :: Parser Arg
        aux = do
          hidden hspace
-         ident <- parseIdent
+         ident <- (parseIdent True)
          hidden hspace
          _ <- char '~'
          hidden hspace
          ty <- parseType
          pure Arg {argIdent = ident, argType = ty}
 
+-- TODO: sort this out.
+-- issue due to binary/unary parsing clashing with custom op parsing.
 parseFuncCall :: Parser SExpr
 parseFuncCall = do
   s <- getCurrentPos
-  ident <- parseOpId <|> parseIdent
+  ident <- (parseIdent False) <|> parseOpId
   hspace1
   args <- parseCallArgs
   e <- getCurrentPos
-  pure $ SEFuncCall s e ident args
+  case () of _
+  -- TODO: turn the identifier into a binary/unary op
+              | ident `elem` binaryOp ->
+                if length args == 2 then let [l, r] = args in pure $ SEBinary (fromBinaryOp ident) s e l r
+                                    else wrongArgCount 2 (length args)
+              | ident `elem` unaryOp ->
+                if length args == 1 then let [v] = args in pure $ SEUnary (fromUnaryOp ident) s e v
+                                    else wrongArgCount 1 (length args)
+              | otherwise -> pure $ SEFuncCall s e ident args
   where
     parseCallArgs :: Parser [SExpr]
     parseCallArgs = parseNested `sepBy` char ' '
 
     parseOpId :: Parser T.Text
-    parseOpId = liftM T.pack $ some symbolChar
+    parseOpId = liftM T.pack $ some lizSymbols
+
+    binaryOp :: [T.Text]
+    binaryOp = ["++", "==", "!=", "+", "-", "*", "/", ">=", "<=", ">", "<"]
+
+    unaryOp :: [T.Text]
+    unaryOp = ["not", "negate"]
+
+    -- TODO: change the ways these work, I don't like the execeptions.
+    fromBinaryOp :: T.Text -> BinaryOp
+    fromBinaryOp op =
+      case op of
+        "++" -> Concat
+        "==" -> Eql
+        "!=" -> NotEql
+        "+" -> Add
+        "-" -> Subtract
+        "*" -> Multiply
+        "/" -> Divide
+        ">=" -> GreaterEql
+        "<=" -> LessEql
+        ">" -> Greater
+        "<" -> Less
+        _ -> error "Reached unreachable in fromBinaryOp"
+
+    fromUnaryOp :: T.Text -> UnaryOp
+    fromUnaryOp op =
+      case op of
+        "not" -> Not
+        "negate" -> Negate
+        _ -> error "Reached unreachable in fromUnaryOp"
 
 parseBlock :: Parser SExpr
 parseBlock = do
@@ -332,8 +345,6 @@ parseSExpr :: Parser SExpr
 parseSExpr = (between (char '(') (char ')') $ 
   label "valid S-Expression" 
     (choice [parseFuncDecl
-            , parseBinary
-            , parseUnary
             , parseVarDecl
             , parseSetStmt
             , parseIfStmt

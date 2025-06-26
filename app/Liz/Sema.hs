@@ -36,7 +36,7 @@ collectErrors :: [Either [E.SemErr] L.Type] -> [E.SemErr] -> [L.Type] -> ([E.Sem
 collectErrors [] errs types = (errs, types)
 collectErrors (x : xs) errs types =
   case x of
-    Left err -> collectErrors xs (err ++ errs) types
+    Left e -> collectErrors xs (e ++ errs) types
     Right t -> collectErrors xs errs (t : types)
 
 -- main sema functions
@@ -98,7 +98,7 @@ infer (L.SEVar s e v) env = inferVariable s e v env False
 infer (L.SEConst s e v) env = inferVariable s e v env True
 infer (L.SESet s e i v) env = inferSet s e i v env
 infer (L.SEReturn _ _ v) env = infer v env
-infer (L.SEPrint _ _ _) env = (Right L.Unit', env)
+infer (L.SEPrint _ _ v) env = infer v env
 infer (L.SEFunc f) env = inferFunc f env
 infer (L.SEBlockStmt s e body) env = inferBlock s e body env
 infer (L.SEFuncCall s e iden args) env = inferFuncCall s e iden args env
@@ -204,12 +204,13 @@ inferFunc (L.Func{..}) env@(Env{..})
   | otherwise =
     let
       envWithArgs = flip addArgs env $ map (\L.Arg{..} -> (argIdent, argType)) funcArgs
-      result = evaluateBody funcBody envWithArgs -- the old env has none of definitions, so we discard the result
+      result = reverse $ evaluateBody funcBody envWithArgs
       errsAndTypes = collectErrors result [] []
     in aux errsAndTypes funcReturnType
   where
     aux (errs, types) ret =
       case () of _
+                  | length errs /= 0 && last types /= ret -> (Left $ (E.IncorrectType funcStart funcEnd ret (last types)) : errs, env)
                   | length errs /= 0 -> (Left errs, env)
                   | last types /= ret -> (Left $ [E.IncorrectType funcStart funcEnd ret (last types)], env)
                   | otherwise -> 
@@ -217,13 +218,13 @@ inferFunc (L.Func{..}) env@(Env{..})
                       in (Right ret, env{envFuncs=newFuncMap})
 
     addArgs :: [(T.Text, L.Type)] -> Env -> Env
-    addArgs [] table = table
+    addArgs [] e = e
     addArgs ((i, t) : xs) e@(Env{envConsts=cenv}) = addArgs xs $ e{envConsts=M.insert i t cenv} -- args are constant by default
 
 inferBlock :: L.LizPos -> L.LizPos -> [L.SExpr] -> Env -> (Either [E.SemErr] L.Type, Env)
 inferBlock s e body env =
   let 
-    result = evaluateBody body env
+    result = reverse $ evaluateBody body env
     (errs, types) = collectErrors result [] []
   in
   if length errs /= 0 then (Left errs, env)

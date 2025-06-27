@@ -29,8 +29,11 @@ combineEnv (Env {envFuncs=symF1, envVars=symV1, envConsts=symC1}) (Env {envFuncs
   in Env {envFuncs, envVars, envConsts}
 
 evaluateBody :: [L.SExpr] -> Env -> [Either [E.SemErr] L.Type]
-evaluateBody [] _ = []
-evaluateBody (x : xs) env = let (res, nenv) = infer x env in res : evaluateBody xs nenv
+evaluateBody exprs e = reverse $ aux exprs e
+  where
+    aux :: [L.SExpr] -> Env -> [Either [E.SemErr] L.Type]
+    aux [] _ = []
+    aux (x : xs) env = let (res, nenv) = infer x env in res : aux xs nenv
 
 collectErrors :: [Either [E.SemErr] L.Type] -> [E.SemErr] -> [L.Type] -> ([E.SemErr], [L.Type])
 collectErrors [] errs types = (errs, types)
@@ -43,6 +46,7 @@ collectErrors (x : xs) errs types =
 testing :: L.Program -> FilePath -> IO ()
 testing (L.Program prog) f = do
   let
+  -- TODO: check that there's only one main function
     (res, hasMain) = aux (filter (L.SEComment ==) prog) mkEnv False []
     (errs, _) = collectErrors res [] []
   case () of _
@@ -98,7 +102,7 @@ infer (L.SEVar s e v) env = inferVariable s e v env False
 infer (L.SEConst s e v) env = inferVariable s e v env True
 infer (L.SESet s e i v) env = inferSet s e i v env
 infer (L.SEReturn _ _ v) env = infer v env
-infer (L.SEPrint _ _ v) env = infer v env
+infer (L.SEPrint _ _ _) env = (Right L.Unit', env)
 infer (L.SEFunc f) env = inferFunc f env
 infer (L.SEBlockStmt s e body) env = inferBlock s e body env
 infer (L.SEFuncCall s e iden args) env = inferFuncCall s e iden args env
@@ -204,7 +208,7 @@ inferFunc (L.Func{..}) env@(Env{..})
   | otherwise =
     let
       envWithArgs = flip addArgs env $ map (\L.Arg{..} -> (argIdent, argType)) funcArgs
-      result = reverse $ evaluateBody funcBody envWithArgs
+      result = evaluateBody funcBody envWithArgs
       errsAndTypes = collectErrors result [] []
     in aux errsAndTypes funcReturnType
   where
@@ -224,7 +228,7 @@ inferFunc (L.Func{..}) env@(Env{..})
 inferBlock :: L.LizPos -> L.LizPos -> [L.SExpr] -> Env -> (Either [E.SemErr] L.Type, Env)
 inferBlock s e body env =
   let 
-    result = reverse $ evaluateBody body env
+    result = evaluateBody body env
     (errs, types) = collectErrors result [] []
   in
   if length errs /= 0 then (Left errs, env)
@@ -271,6 +275,7 @@ inferIfStmt s e cond tbranch (Just fbranch) env =
     (err@((Left _), _), _, _) -> err
     (_, err@(Left _, _), _) -> err
     (_, _, err@(Left _, _)) -> err
-    ((Right tccond, _), (Right tctbr, _), (Right tcfbr, nenv)) | tccond /= L.Bool' -> (Left [E.IncorrectType s e L.Bool' tccond], nenv)
+    ((Right tccond, _), (Right tctbr, _), (Right tcfbr, nenv)) | tccond /= L.Bool' && tctbr /= tcfbr -> (Left [E.IncorrectType s e L.Bool' tccond, E.IncorrectType s e tctbr tcfbr], nenv)
+                                                               | tccond /= L.Bool' -> (Left [E.IncorrectType s e L.Bool' tccond], nenv)
                                                                | tctbr /= tcfbr -> (Left [E.IncorrectType s e tctbr tcfbr], nenv)
                                                                | otherwise -> (Right tcfbr, nenv)

@@ -5,7 +5,7 @@
 - [x] Basic type inference.
 - [x] Parse more complex expressions, like `func` and function calls.
 - [x] Change `func` to `def`
-- [ ] Add syntax to define custom operators (maybe `(def (<$>) [...] (...))` ?)
+- [x] Add syntax to define custom operators (maybe `(def (<$>) [...] (...))` ?)
 - [x] Add `block` keyword for a block of expressions.
 
 ## Semantic Analysis

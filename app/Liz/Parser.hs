@@ -45,6 +45,9 @@ wrongArgCount ex got = customFailure $ E.WrongArgCount ex got
 getCurrentPos :: Parser (Pos, Pos) 
 getCurrentPos = getSourcePos >>= \p -> pure (sourceLine p, sourceColumn p)
 
+scn :: Parser ()
+scn = L.space space1 (void $ spaceChar <|> tab) empty
+
 lizReserved :: [T.Text]
 lizReserved = 
   [ "var", "set", "const", "if", "def", "return", "False",
@@ -176,15 +179,15 @@ parseVarDecl :: Parser SExpr
 parseVarDecl = do
   s <- getCurrentPos
   decType <- SEVar s <$ string "var" <|> SEConst s <$ string "const"
-  hspace1
+  _ <- some hspace1
   ident <- parseIdent True
-  hspace1 
+  _ <- some hspace1 
   ty <- (liftM SEType parseType) <|> parseNested
   aux decType ident ty
   where
     aux decl iden (SEType ty) = do
-      hspace1
-      value <- parseNested
+      _ <- some hspace1
+      value <- L.lineFold scn $ \_ -> parseNested
       e <- getCurrentPos
       pure $ decl e Var{varIdent=iden, varType=ty, varValue=value}
     aux decl iden lit@(SELiteral ty _ _ _) = do
@@ -230,8 +233,6 @@ parseFuncDecl = do
    e <- getCurrentPos
    pure $ SEFunc Func {funcIdent = ident, funcStart = s, funcEnd = e, funcArgs = args, funcReturnType = retTy, funcBody = block}
    where
-    scn :: Parser ()
-    scn = L.space space1 (void $ spaceChar <|> tab) empty
 
     parseOpId :: Parser T.Text
     parseOpId = do
@@ -254,8 +255,6 @@ parseFuncDecl = do
          ty <- parseType
          pure Arg {argIdent = ident, argType = ty}
 
--- TODO: sort this out.
--- issue due to binary/unary parsing clashing with custom op parsing.
 parseFuncCall :: Parser SExpr
 parseFuncCall = do
   s <- getCurrentPos
@@ -264,7 +263,6 @@ parseFuncCall = do
   args <- parseCallArgs
   e <- getCurrentPos
   case () of _
-  -- TODO: turn the identifier into a binary/unary op
               | ident `elem` binaryOp ->
                 if length args == 2 then let [l, r] = args in pure $ SEBinary (fromBinaryOp ident) s e l r
                                     else wrongArgCount 2 (length args)
@@ -285,7 +283,7 @@ parseFuncCall = do
     unaryOp :: [T.Text]
     unaryOp = ["not", "negate"]
 
-    -- TODO: change the ways these work, I don't like the execeptions.
+    -- TODO: change the ways these work, I don't like the exceptions.
     fromBinaryOp :: T.Text -> BinaryOp
     fromBinaryOp op =
       case op of
@@ -317,9 +315,6 @@ parseBlock = do
   block <- some $ L.lineFold scn $ \_ -> parseSExpr
   e <- getCurrentPos
   pure $ SEBlockStmt s e block
-  where
-    scn :: Parser ()
-    scn = L.space space1 (void $ spaceChar <|> tab) empty
 
 -- TODO: fix errors here (mainly with empty ifs)
 parseIfStmt :: Parser SExpr
@@ -337,9 +332,6 @@ parseIfStmt = do
               | otherwise ->
                 let [truebr, falsebr] = block in
                 pure $ SEIfStmt s e cond truebr (Just falsebr)
-  where
-    scn :: Parser ()
-    scn = L.space space1 (void $ spaceChar <|> tab) empty
 
 parseSExpr :: Parser SExpr
 parseSExpr = (between (char '(') (char ')') $ 
@@ -356,9 +348,6 @@ parseSExpr = (between (char '(') (char ')') $
 
 parseProgram :: Parser [SExpr]
 parseProgram = some $ try $ scn >> parseSExpr
-  where
-    scn :: Parser ()
-    scn = L.space space1 empty empty
 
 parseFile :: FilePath -> T.Text -> Either (ParseErrorBundle T.Text E.PError) Program
 parseFile f fc = do

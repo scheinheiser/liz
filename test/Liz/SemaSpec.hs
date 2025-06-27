@@ -43,7 +43,6 @@ analyseProgram p@(L.Program prog) =
         (res, next) = S.infer ex sym
       in res : aux exprs next
 
--- TODO: tests for if/block checking.
 spec :: Spec
 spec = do
   describe "Type checking" $ do
@@ -355,3 +354,91 @@ spec = do
         let parsed = P.parseFile "" input
         let output = getOutput parsed
         (analyseProgram output) `shouldBe` (Left [E.IncorrectArgTypes (mkPos 3, mkPos 2) (mkPos 3, mkPos 19) "concat" [L.String', L.String'] [L.Bool', L.Bool']])
+    describe "Blocks" $ do
+      it "Check a block" $ do
+        let input = """
+          (var block_assign Int 
+          \&  (block 
+          \&    (const fiveteen Int (+ 5 10))
+          \&    (return (* fiveteen 2))))\
+          \"""
+        let parsed = P.parseFile "" input
+        let output = getOutput parsed
+        (analyseProgram output) `shouldBe` (Right $ L.Program [
+          L.SEVar (mkPos 1,mkPos 2) (mkPos 4,mkPos 29) (L.Var {
+            varIdent = "block_assign", 
+            varType = L.Int', 
+            varValue = L.SEBlockStmt (mkPos 2,mkPos 4) (mkPos 4,mkPos 28) [
+              L.SEConst (mkPos 3,mkPos 6) (mkPos 3,mkPos 33) (L.Var {
+                varIdent = "fiveteen", 
+                varType = L.Int', 
+                varValue = 
+                  L.SEBinary L.Add (mkPos 3,mkPos 26) (mkPos 3,mkPos 32) (L.SELiteral L.Int' "5" (mkPos 3,mkPos 28) (mkPos 3,mkPos 29)) (L.SELiteral L.Int' "10" (mkPos 3,mkPos 30) (mkPos 3,mkPos 32))}),
+          L.SEReturn (mkPos 4,mkPos 6) (mkPos 4,mkPos 27) 
+            (L.SEBinary L.Multiply (mkPos 4,mkPos 14) (mkPos 4,mkPos 26) (L.SEIdentifier "fiveteen" (mkPos 4,mkPos 16) (mkPos 4,mkPos 24)) (L.SELiteral L.Int' "2" (mkPos 4,mkPos 25) (mkPos 4,mkPos 26)))]})])
+      it "Fail checking a block" $ do
+        let input = """
+          (var block_assign String 
+          \&  (block 
+          \&    (const fiveteen Int (+ 5 10))
+          \&    (return (* fiveteen 2))))\
+          \"""
+        let parsed = P.parseFile "" input
+        let output = getOutput parsed
+        (analyseProgram output) `shouldBe` (Left [E.IncorrectType (mkPos 1, mkPos 2) (mkPos 4, mkPos 29) L.String' L.Int'])
+      describe "If Statements" $ do
+        it "Check an if statement with no else" $ do
+          let input = """
+            (if (== "hello" "hello")
+            \&  (print "hello"))\
+            \"""
+          let parsed = P.parseFile "" input
+          let output = getOutput parsed
+          (analyseProgram output) `shouldBe` (Right $ L.Program [
+            (L.SEIfStmt (mkPos 1, mkPos 2) (mkPos 2, mkPos 18)
+              (L.SEBinary L.Eql (mkPos 1, mkPos 6) (mkPos 1, mkPos 24) 
+                (L.SELiteral L.String' "\"hello\"" (mkPos 1, mkPos 9) (mkPos 1, mkPos 16)) (L.SELiteral L.String' "\"hello\"" (mkPos 1, mkPos 17) (mkPos 1, mkPos 24)))
+              (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 17) (L.SELiteral L.String' "\"hello\"" (mkPos 2, mkPos 10) (mkPos 2, mkPos 17))) Nothing)])
+        it "Check an if statement with an else" $ do
+          let input = """
+            (if (== "hello" "hello")
+            \&  (print "hello")
+            \&  (print "bye"))\
+            \"""
+          let parsed = P.parseFile "" input
+          let output = getOutput parsed
+          (analyseProgram output) `shouldBe` (Right $ L.Program [
+            (L.SEIfStmt (mkPos 1, mkPos 2) (mkPos 3, mkPos 16)
+            (L.SEBinary L.Eql (mkPos 1, mkPos 6) (mkPos 1, mkPos 24) 
+              (L.SELiteral L.String' "\"hello\"" (mkPos 1, mkPos 9) (mkPos 1, mkPos 16)) (L.SELiteral L.String' "\"hello\"" (mkPos 1, mkPos 17) (mkPos 1, mkPos 24)))
+            (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 17) (L.SELiteral L.String' "\"hello\"" (mkPos 2, mkPos 10) (mkPos 2, mkPos 17)))
+            (Just (L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 15) (L.SELiteral L.String' "\"bye\"" (mkPos 3, mkPos 10) (mkPos 3, mkPos 15)))))])
+        it "Fail checking an if statement with a branch type mismatch" $ do
+          let input = """
+            (if (not True)
+            \&  (return "this can't work...")
+            \&  (print "bye"))\
+            \"""
+          let parsed = P.parseFile "" input
+          let output = getOutput parsed
+          (analyseProgram output) `shouldBe` (Left [E.IncorrectType (mkPos 1, mkPos 2) (mkPos 3, mkPos 16) L.String' L.Unit'])
+        it "Fail checking an if statement with a non-bool condition" $ do
+          let input = """
+            (if (+ 5 10)
+            \&  (return "this can't work...")
+            \&  (print "bye"))\
+            \"""
+          let parsed = P.parseFile "" input
+          let output = getOutput parsed
+          (analyseProgram output) `shouldBe` (Left [(E.IncorrectType (mkPos 1, mkPos 2) (mkPos 3, mkPos 16) L.Bool' L.Int'), (E.IncorrectType (mkPos 1, mkPos 2) (mkPos 3, mkPos 16) L.String' L.Unit')])
+        it "Fail checking an if statement with an erroneous sexpr" $ do
+          let input = """
+            (if (not True)
+            \&  (block 
+            \&    (var five String 10)
+            \&    (return five))
+            \&  (return 10))\
+            \"""
+          let parsed = P.parseFile "" input
+          let output = getOutput parsed
+          (analyseProgram output) `shouldBe` (Left [E.IncorrectType (mkPos 3, mkPos 6) (mkPos 3, mkPos 24) L.String' L.Int'])

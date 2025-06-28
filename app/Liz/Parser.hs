@@ -6,6 +6,7 @@ module Liz.Parser where
 
 import qualified Liz.Common.Errors as E
 import qualified Data.Text as T
+import qualified Data.List.NonEmpty as NE
 import Liz.Common.Types
 
 import Data.String ( IsString (..))
@@ -164,8 +165,11 @@ parseRet = do
 parseComment :: Parser SExpr
 parseComment = do
   _ <- char ';'
-  _ <- hidden $ some $ alphaNumChar <|> punctuationChar <|> char ' '
+  _ <- hidden $ takeWhileP Nothing valid
   pure SEComment
+  where
+    valid :: Char -> Bool
+    valid = liftA2 (||) isPrint ('\n' /=)
 
 {-
   ({var | const} *ident* *type* *value*)

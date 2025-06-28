@@ -7,17 +7,8 @@ module Liz.IR where
 import qualified Liz.Common.Types as L
 -- import qualified Liz.Common.Errors as E
 import qualified Data.Text as T
+import qualified Data.List.NonEmpty as NE
 
-data Lit = LBool Bool 
-  | LInt Int 
-  | LFloat Double
-  | LString T.Text
-  | LChar Char 
-  | LUnit
-  | LUndef
-  deriving Show
-
--- TODO: add 'goto' op when control flow is implemented
 data IROp = IRInt Int
   | IRBool Bool 
   | IRFloat Double
@@ -32,7 +23,15 @@ data IROp = IRInt Int
   | IRPrint IROp
   | IRVar T.Text IROp
   | IRConst T.Text IROp
+  | IRFunc T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
+  | IRIf IROp (Goto, Label) (Maybe (Goto, Label))
+  | IRLabel Label -- a wrapper around the label for the leader algorithm
   deriving Show
+
+newtype Label = Label (T.Text, [IROp])
+  deriving Show
+
+type Goto = T.Text
 
 -- helper functions
 fromComp :: (Eq a, Ord a) => L.BinaryOp -> (a -> a -> Bool)
@@ -48,44 +47,115 @@ fromArith L.Multiply = (*)
 fromArith L.Subtract = (-)
 fromArith L.Add = (+)
 
--- main functions
+pushExpr :: Label -> IROp -> Label
+pushExpr (Label (n, exprs)) instr = Label (n, reverse (instr : exprs))
+
+translateBody :: [L.SExpr] -> Int -> ([IROp], Int)
+translateBody l idx = let (res, i) = aux l idx [] in (reverse res, i)
+  where
+    aux :: [L.SExpr] -> Int -> [IROp] -> ([IROp], Int)
+    aux [] i acc = (acc, i)
+    aux (x : xs) i acc = let (op, ni) = fromSExpr x i in aux xs ni (op : acc)
+
+tempVarIdent :: Int -> T.Text
+tempVarIdent i = T.pack $ "t" <> (show i)
+
+-- main ir functions
 
 -- TODO: Do a TAC-style thing where each expr is allocated to a temp variable.
 -- Just accept some count for temp no.s, and allocate in binary/unary branch
-fromSExpr :: L.SExpr -> IROp
-fromSExpr (L.SELiteral ty lit _ _) =
-  case ty of
-    L.Int' -> IRInt $ read @Int (T.unpack lit)
-    L.Float' -> IRFloat $ read @Double (T.unpack lit)
-    L.Bool' -> IRBool $ read @Bool (T.unpack lit)
-    L.Char' -> IRChar $ read @Char (T.unpack lit)
-    L.Unit' -> IRUnit
-    L.Undef' -> IRUndef
-    L.String' -> IRString lit
-fromSExpr (L.SEBinary op _ _ l r) =
-  case op of
-    L.Add -> IRBin L.Add (fromSExpr l) (fromSExpr r)
-    L.Subtract -> IRBin L.Subtract (fromSExpr l) (fromSExpr r)
-    L.Multiply -> IRBin L.Multiply (fromSExpr l) (fromSExpr r)
-    L.Divide -> IRBin L.Divide (fromSExpr l) (fromSExpr r)
-    L.Concat -> IRBin L.Concat (fromSExpr l) (fromSExpr r)
-    L.GreaterEql -> IRBin L.GreaterEql (fromSExpr l) (fromSExpr r)
-    L.LessEql -> IRBin L.LessEql (fromSExpr l) (fromSExpr r)
-    L.Eql -> IRBin L.Eql (fromSExpr l) (fromSExpr r)
-    L.NotEql -> IRBin L.NotEql (fromSExpr l) (fromSExpr r)
-    L.Greater -> IRBin L.Greater (fromSExpr l) (fromSExpr r)
-    L.Less -> IRBin L.Less (fromSExpr l) (fromSExpr r)
-fromSExpr (L.SEUnary op _ _ v) =
-  case op of
-    L.Not -> IRUn L.Not (fromSExpr v)
-    L.Negate -> IRUn L.Negate (fromSExpr v)
-fromSExpr (L.SEVar _ _ L.Var{varIdent=i, varValue=val}) = IRVar i (fromSExpr val)
-fromSExpr (L.SEConst _ _ L.Var{varIdent=i, varValue=val}) = IRConst i (fromSExpr val)
-fromSExpr (L.SESet _ _ i val) = IRVar i (fromSExpr val)
-fromSExpr (L.SEIdentifier i _ _) = IRIdent i
-fromSExpr (L.SEReturn _ _ v) = IRRet $ fromSExpr v
-fromSExpr (L.SEPrint _ _ v) = IRPrint $ fromSExpr v
+fromSExpr :: L.SExpr -> Int -> (IROp, Int)
+fromSExpr (L.SELiteral ty lit _ _) i =
+  let 
+    v = 
+      case ty of
+        L.Int' -> IRInt $ read @Int (T.unpack lit)
+        L.Float' -> IRFloat $ read @Double (T.unpack lit)
+        L.Bool' -> IRBool $ read @Bool (T.unpack lit)
+        L.Char' -> IRChar $ read @Char (T.unpack lit)
+        L.Unit' -> IRUnit
+        L.Undef' -> IRUndef
+        L.String' -> IRString lit
+  in (v, i)
+fromSExpr (L.SEBinary op _ _ l r) i =
+  let
+    (el, ni) = fromSExpr l i
+    (er, fi) = fromSExpr r ni
+    irOp = 
+      case op of
+        L.Add -> IRBin L.Add
+        L.Subtract -> IRBin L.Subtract
+        L.Multiply -> IRBin L.Multiply
+        L.Divide -> IRBin L.Divide
+        L.Concat -> IRBin L.Concat
+        L.GreaterEql -> IRBin L.GreaterEql
+        L.LessEql -> IRBin L.LessEql
+        L.Eql -> IRBin L.Eql
+        L.NotEql -> IRBin L.NotEql
+        L.Greater -> IRBin L.Greater
+        L.Less -> IRBin L.Less
+  in (IRVar (tempVarIdent $ fi + 1) (irOp el er), fi)
+fromSExpr (L.SEUnary op _ _ v) i =
+  let
+    (ev, ni) = fromSExpr v i
+    irOp = 
+      case op of
+        L.Not -> IRUn L.Not
+        L.Negate -> IRUn L.Negate
+  in (IRVar (tempVarIdent $ ni + 1) (irOp ev), ni)
+fromSExpr (L.SEVar _ _ L.Var{varIdent=ident, varValue=val}) i = 
+  let (evaluated_value, ni) = fromSExpr val i in ((IRVar ident evaluated_value), ni)
+fromSExpr (L.SEConst _ _ L.Var{varIdent=ident, varValue=val}) i = 
+  let (evaluated_value, ni) = fromSExpr val i in ((IRConst ident evaluated_value), ni)
+fromSExpr (L.SEFunc L.Func{funcIdent=ident, funcArgs=args, funcReturnType=ret, funcBody=body}) i =
+  let (tbody, ni) = translateBody body i in (IRFunc ident args tbody ret, ni)
+fromSExpr (L.SESet _ _ ident val) i = 
+  let (evaluated_value, ni) = fromSExpr val i in ((IRVar ident evaluated_value), ni)
+fromSExpr (L.SEIdentifier ident _ _) i = (IRIdent ident, i)
+fromSExpr (L.SEReturn _ _ v) i = 
+  let (ev, ni) = fromSExpr v i in (IRRet ev, ni)
+fromSExpr (L.SEPrint _ _ v) i = 
+  let (ev, ni) = fromSExpr v i in (IRPrint ev, ni)
 
+applyLeaders :: NE.NonEmpty IROp -> [IROp]
+applyLeaders prog = 
+  let
+    label_idx = 0
+    first_lead = Label ((labelPrefix label_idx), [NE.head prog])
+  in aux (NE.drop 1 prog) first_lead [] label_idx
+  where
+    labelPrefix :: Int -> T.Text
+    labelPrefix i = T.pack $ "L" <> (show i)
+
+    aux :: [IROp] -> Label -> [IROp] -> Int -> [IROp]
+    aux [] curr_lbl acc _ = reverse $ (IRLabel curr_lbl) : acc
+    aux ((IRFunc ident args fexprs ret) : rest) old_lbl acc i =
+      let led_func = IRFunc ident args (applyLeaders $ NE.fromList fexprs) ret in
+      aux rest (Label (labelPrefix i, [])) (led_func : (IRLabel old_lbl) : acc) (i + 1)
+
+    aux ((IRIf cond (goto, (Label (tname, texprs))) Nothing) : rest) old_lbl acc i =
+      let 
+        led_branch = applyLeaders $ NE.fromList texprs 
+        led_ifstmt = IRIf cond (goto, Label (tname, led_branch)) Nothing
+      in aux rest (Label (labelPrefix i, [])) (led_ifstmt : (IRLabel old_lbl) : acc) (i + 1)
+
+    aux ((IRIf cond (gototrue, (Label (tname, texprs))) (Just (gotofalse, (Label (fname, fexprs))))) : rest) old_lbl acc i =
+      let 
+        led_tbranch = applyLeaders $ NE.fromList texprs 
+        led_fbranch = applyLeaders $ NE.fromList fexprs
+        led_ifstmt = IRIf cond (gototrue, Label (tname, led_tbranch)) (Just (gotofalse, Label (fname, led_fbranch)))
+      in aux rest (Label (labelPrefix i, [])) (led_ifstmt : (IRLabel old_lbl) : acc) (i + 1)
+
+    aux (expr : rest) curr_lbl acc i = aux rest (pushExpr curr_lbl expr) acc i
+
+programToIR :: L.Program -> [IROp]
+programToIR (L.Program sexprs) = applyLeaders $ NE.fromList $ reverse $ naiveConv sexprs 0
+  where
+    naiveConv :: [L.SExpr] -> Int -> [IROp]
+    naiveConv [] _ = []
+    naiveConv (x : xs) i = let (instr, ni) = fromSExpr x i in instr : naiveConv xs ni
+
+-- main optimisation functions
 foldExpr :: IROp -> IROp
 foldExpr l@(IRInt _; IRFloat _; IRString _; IRChar _; IRBool _) = l
 foldExpr op@(IRBin p@(L.Add; L.Subtract; L.Multiply) l r) =

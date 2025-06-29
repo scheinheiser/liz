@@ -16,5 +16,5 @@ But I'm not a fan of the arrows.
 
 ---------
 
-Implement my own IR before it's compiled to LLVM/asm.\
-I'd like to try and implement my own optimisations (e.g. constant folding) for learning.
+With errors, pick up slices of the file where the error is located.
+Similar to Haskell errors, it'd help the user see the error more clearly.

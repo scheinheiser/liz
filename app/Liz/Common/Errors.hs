@@ -20,6 +20,7 @@ data SemErr = IncorrectType LizPos LizPos Type Type -- expected type ; given typ
   | TooManyArgs LizPos LizPos T.Text Int
   | IncorrectArgTypes LizPos LizPos T.Text [Type] [Type] -- expected types ; given types
   | NoEntrypoint
+  | MultipleEntrypoints
   | NotImplemented SExpr
   deriving (Show, Eq)
 

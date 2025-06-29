@@ -170,14 +170,6 @@ parseComment = do
     valid :: Char -> Bool
     valid = liftA2 (||) isPrint ('\n' /=)
 
-{-
-  ({var | const} *ident* *type* *value*)
-    (var hello String "World")
-    (const four 4) ; inferred Int 
-    (var not_allowed (+ 5 6))
-                      ^ For now, you can't declare a variable with inferred type using a nested statement.
-                        Maybe I'll add support later on.
--}
 parseVarDecl :: Parser SExpr
 parseVarDecl = do
   s <- getCurrentPos
@@ -209,16 +201,6 @@ parseSetStmt = do
   e <- getCurrentPos
   pure $ SESet s e ident value
 
-{-
-  (def *ident* *args* *return type* *body*)
-    (def flip [b ~ Bool] > Bool 
-     (not b))
-
-    (def say_hi [name ~ String] > Unit
-     (const with_hello String (++ "hello " name))
-     (print with_hello)
-     (return ())
--}
 parseFuncDecl :: Parser SExpr
 parseFuncDecl = do
    s <- getCurrentPos
@@ -258,6 +240,7 @@ parseFuncDecl = do
          ty <- parseType
          pure Arg {argIdent = ident, argType = ty}
 
+-- NOTE: think about changing how this works someday, it feels a little hacky.
 parseFuncCall :: Parser SExpr
 parseFuncCall = do
   s <- getCurrentPos

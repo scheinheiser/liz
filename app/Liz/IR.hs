@@ -26,7 +26,7 @@ data IROp = IRInt Int
   | IRFunc T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
   | IRIf IROp (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
   | IRLabel Label -- a wrapper around the label for the leader algorithm
-  | IRGoto Goto
+  | IRGoto Goto -- a wrapper around goto for control flow/leader algorithm
   deriving Show
 
 newtype Label = Label (T.Text, [IROp]) -- name, expressions

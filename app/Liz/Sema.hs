@@ -49,20 +49,22 @@ testing :: L.Program -> FilePath -> IO ()
 testing (L.Program prog) f = do
   let
   -- TODO: check that there's only one main function
-    (res, hasMain) = aux (filter (L.SEComment ==) prog) mkEnv False []
+    (res, hasMain) = aux (filter (L.SEComment ==) prog) mkEnv 0 []
     (errs, _) = collectErrors res [] []
   case () of _
-              | length errs /= 0 && not hasMain -> Log.printErrs f (E.NoEntrypoint : errs) []
+              | length errs /= 0 && hasMain > 1 -> Log.printErrs f (E.MultipleEntrypoints : errs) []
+              | length errs /= 0 && hasMain == 0 -> Log.printErrs f (E.NoEntrypoint : errs) []
               | length errs /= 0 -> Log.printErrs f errs []
-              | not hasMain -> Log.printErrs f errs []
+              | hasMain == 0 -> Log.printErrs f [E.NoEntrypoint] []
+              | hasMain > 1 -> Log.printErrs f [E.MultipleEntrypoints] []
               | otherwise -> putStrLn "all good"
   where
-    aux :: [L.SExpr] -> Env -> Bool -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Bool)
+    aux :: [L.SExpr] -> Env -> Int -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Int)
     aux [] _ hasMain acc = (acc, hasMain)
     aux (ex@(L.SEFunc L.Func{funcIdent=i}) : exprs) sym hasMain acc =
       let
         (res, next) = infer ex sym
-      in if i == "main" then aux exprs next True (res : acc)
+      in if i == "main" then aux exprs next (hasMain + 1) (res : acc)
                         else aux exprs next hasMain (res : acc)
     aux (ex : exprs) sym hasMain acc =
       let
@@ -73,21 +75,23 @@ testing (L.Program prog) f = do
 analyseProgram :: L.Program -> Either [E.SemErr] L.Program
 analyseProgram p@(L.Program prog) = 
   let
-    (res, hasMain) = aux prog mkEnv False []
+    (res, hasMain) = aux prog mkEnv 0 []
     (errs, _) = collectErrors res [] []
   in
   case () of _
-              | length errs /= 0 && not hasMain -> Left $ E.NoEntrypoint : errs
+              | length errs /= 0 && hasMain > 1 -> Left $ E.MultipleEntrypoints : errs
+              | length errs /= 0 && hasMain == 0 -> Left $ E.NoEntrypoint : errs
               | length errs /= 0 -> Left errs
-              | not hasMain -> Left [E.NoEntrypoint]
+              | hasMain == 0 -> Left [E.NoEntrypoint]
+              | hasMain > 1 -> Left [E.MultipleEntrypoints]
               | otherwise -> Right p
   where
-    aux :: [L.SExpr] -> Env -> Bool -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Bool)
+    aux :: [L.SExpr] -> Env -> Int -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Int)
     aux [] _ hasMain acc = (acc, hasMain)
     aux (ex@(L.SEFunc L.Func{funcIdent=i}) : exprs) sym hasMain acc =
       let
         (res, next) = infer ex sym
-      in if i == "main" then aux exprs next True (res : acc)
+      in if i == "main" then aux exprs next (hasMain + 1) (res : acc)
                         else aux exprs next hasMain (res : acc)
     aux (ex : exprs) sym hasMain acc =
       let

@@ -6,7 +6,6 @@ module Liz.Parser where
 
 import qualified Liz.Common.Errors as E
 import qualified Data.Text as T
-import qualified Data.List.NonEmpty as NE
 import Liz.Common.Types
 
 import Data.String ( IsString (..))

@@ -6,6 +6,8 @@
 module Liz.Sema where
 
 import qualified Liz.Common.Errors as E
+import qualified Liz.Common.Logging as Log
+
 import qualified Liz.Common.Types as L
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -50,9 +52,9 @@ testing (L.Program prog) f = do
     (res, hasMain) = aux (filter (L.SEComment ==) prog) mkEnv False []
     (errs, _) = collectErrors res [] []
   case () of _
-              | length errs /= 0 && not hasMain -> E.printErrs f (E.NoEntrypoint : errs) []
-              | length errs /= 0 -> E.printErrs f errs []
-              | not hasMain -> E.printErrs f errs []
+              | length errs /= 0 && not hasMain -> Log.printErrs f (E.NoEntrypoint : errs) []
+              | length errs /= 0 -> Log.printErrs f errs []
+              | not hasMain -> Log.printErrs f errs []
               | otherwise -> putStrLn "all good"
   where
     aux :: [L.SExpr] -> Env -> Bool -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Bool)

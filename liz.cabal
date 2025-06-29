@@ -17,6 +17,7 @@ executable liz
     other-modules: Liz.Parser
       , Liz.Common.Types
       , Liz.Common.Errors
+      , Liz.Common.Logging
       , Liz.Sema
       , Liz.Codegen
       , Liz.IR
@@ -43,6 +44,7 @@ test-suite liz-test
       , Liz.IR
       , Liz.SemaSpec
       , Liz.Common.Errors
+      , Liz.Common.Logging
       , Liz.Common.Types
     other-extensions: OverloadedStrings, MultilineStrings
     type:             exitcode-stdio-1.0

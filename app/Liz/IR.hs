@@ -24,11 +24,12 @@ data IROp = IRInt Int
   | IRVar T.Text IROp
   | IRConst T.Text IROp
   | IRFunc T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
-  | IRIf IROp (Goto, Label) (Maybe (Goto, Label))
+  | IRIf IROp (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
   | IRLabel Label -- a wrapper around the label for the leader algorithm
+  | IRGoto Goto
   deriving Show
 
-newtype Label = Label (T.Text, [IROp])
+newtype Label = Label (T.Text, [IROp]) -- name, expressions
   deriving Show
 
 type Goto = T.Text
@@ -61,9 +62,6 @@ tempVarIdent :: Int -> T.Text
 tempVarIdent i = T.pack $ "t" <> (show i)
 
 -- main ir functions
-
--- TODO: Do a TAC-style thing where each expr is allocated to a temp variable.
--- Just accept some count for temp no.s, and allocate in binary/unary branch
 fromSExpr :: L.SExpr -> Int -> (IROp, Int)
 fromSExpr (L.SELiteral ty lit _ _) i =
   let 
@@ -94,7 +92,7 @@ fromSExpr (L.SEBinary op _ _ l r) i =
         L.NotEql -> IRBin L.NotEql
         L.Greater -> IRBin L.Greater
         L.Less -> IRBin L.Less
-  in (IRVar (tempVarIdent $ fi + 1) (irOp el er), fi)
+  in (IRVar (tempVarIdent $ fi + 1) (irOp el er), fi + 1)
 fromSExpr (L.SEUnary op _ _ v) i =
   let
     (ev, ni) = fromSExpr v i
@@ -102,7 +100,7 @@ fromSExpr (L.SEUnary op _ _ v) i =
       case op of
         L.Not -> IRUn L.Not
         L.Negate -> IRUn L.Negate
-  in (IRVar (tempVarIdent $ ni + 1) (irOp ev), ni)
+  in (IRVar (tempVarIdent $ ni + 1) (irOp ev), ni + 1)
 fromSExpr (L.SEVar _ _ L.Var{varIdent=ident, varValue=val}) i = 
   let (evaluated_value, ni) = fromSExpr val i in ((IRVar ident evaluated_value), ni)
 fromSExpr (L.SEConst _ _ L.Var{varIdent=ident, varValue=val}) i = 
@@ -116,40 +114,47 @@ fromSExpr (L.SEReturn _ _ v) i =
   let (ev, ni) = fromSExpr v i in (IRRet ev, ni)
 fromSExpr (L.SEPrint _ _ v) i = 
   let (ev, ni) = fromSExpr v i in (IRPrint ev, ni)
+-- NOTE: when going onto if stmts, leave the goto at the of each branch blank.
+-- they can be backpatched when leaders have been applied
 
-applyLeaders :: NE.NonEmpty IROp -> [IROp]
-applyLeaders prog = 
+-- FIX: some logic issue with the code means that label idx suffixes aren't carried over
+applyLabels :: NE.NonEmpty IROp -> [IROp]
+applyLabels prog = 
   let
     label_idx = 0
-    first_lead = Label ((labelPrefix label_idx), [NE.head prog])
+    first_lead = Label ((labelSuffix label_idx), [NE.head prog])
   in aux (NE.drop 1 prog) first_lead [] label_idx
   where
-    labelPrefix :: Int -> T.Text
-    labelPrefix i = T.pack $ "L" <> (show i)
+    labelSuffix :: Int -> T.Text
+    labelSuffix i = T.pack $ "L" <> (show i)
 
     aux :: [IROp] -> Label -> [IROp] -> Int -> [IROp]
-    aux [] curr_lbl acc _ = reverse $ (IRLabel curr_lbl) : acc
+    aux [] curr_lbl@(Label (n, exprs)) acc _ = 
+      if length exprs == 0 then acc
+                           else (IRLabel curr_lbl) : acc
     aux ((IRFunc ident args fexprs ret) : rest) old_lbl acc i =
-      let led_func = IRFunc ident args (applyLeaders $ NE.fromList fexprs) ret in
-      aux rest (Label (labelPrefix i, [])) (led_func : (IRLabel old_lbl) : acc) (i + 1)
+      let led_func = IRFunc ident args (applyLabels $ NE.fromList fexprs) ret in
+      aux rest (Label (labelSuffix i, [])) (led_func : (IRLabel old_lbl) : acc) (i + 1)
 
+    -- TODO: modify if stmt code to reflect the blank gotos? may or may not be necessary
     aux ((IRIf cond (goto, (Label (tname, texprs))) Nothing) : rest) old_lbl acc i =
       let 
-        led_branch = applyLeaders $ NE.fromList texprs 
+        led_branch = applyLabels $ NE.fromList texprs 
         led_ifstmt = IRIf cond (goto, Label (tname, led_branch)) Nothing
-      in aux rest (Label (labelPrefix i, [])) (led_ifstmt : (IRLabel old_lbl) : acc) (i + 1)
+      in aux rest (Label (labelSuffix i, [])) (led_ifstmt : (IRLabel old_lbl) : acc) (i + 1)
 
     aux ((IRIf cond (gototrue, (Label (tname, texprs))) (Just (gotofalse, (Label (fname, fexprs))))) : rest) old_lbl acc i =
       let 
-        led_tbranch = applyLeaders $ NE.fromList texprs 
-        led_fbranch = applyLeaders $ NE.fromList fexprs
+        led_tbranch = applyLabels $ NE.fromList texprs 
+        led_fbranch = applyLabels $ NE.fromList fexprs
         led_ifstmt = IRIf cond (gototrue, Label (tname, led_tbranch)) (Just (gotofalse, Label (fname, led_fbranch)))
-      in aux rest (Label (labelPrefix i, [])) (led_ifstmt : (IRLabel old_lbl) : acc) (i + 1)
+      in aux rest (Label (labelSuffix i, [])) (led_ifstmt : (IRLabel old_lbl) : acc) (i + 1)
 
-    aux (expr : rest) curr_lbl acc i = aux rest (pushExpr curr_lbl expr) acc i
+    aux (goto@(IRGoto _) : rest) old_lbl acc i = aux rest (Label (labelSuffix i, [])) (goto : (IRLabel old_lbl) : acc) (i + 1)
+    aux (expr : rest) curr_lbl acc i = aux rest (pushExpr curr_lbl expr) acc (i + 1)
 
 programToIR :: L.Program -> [IROp]
-programToIR (L.Program sexprs) = applyLeaders $ NE.fromList $ reverse $ naiveConv sexprs 0
+programToIR (L.Program sexprs) = applyLabels $ NE.fromList $ reverse $ naiveConv sexprs 0
   where
     naiveConv :: [L.SExpr] -> Int -> [IROp]
     naiveConv [] _ = []

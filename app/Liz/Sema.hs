@@ -187,26 +187,29 @@ inferVariable s e L.Var{..} env isConst =
         in if isConst then (Left $ [E.IncorrectType s e decType valType], t{envConsts=newenv constMap})
                       else (Left $ [E.IncorrectType s e decType valType], t{envVars=newenv varMap})
       | otherwise = 
-        let newenv = M.insert ident valType 
+        let newenv = M.insert ident decType 
         in if isConst then (Right decType, t{envConsts=newenv constMap})
                       else (Right decType, t{envVars=newenv varMap})
 
 inferSet :: L.LizPos -> L.LizPos -> T.Text -> L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
-inferSet s e ident v env =
+inferSet s end ident v env =
   case (infer v env) of
     err@(Left _, _) -> err
     (Right ty, nenv) -> aux ident ty nenv
   where
     aux :: T.Text -> L.Type -> Env -> (Either [E.SemErr] L.Type, Env)
-    aux i ty table@(Env{..})
-      | i `M.member` envConsts = (Left $ [E.AssigningToConstant s e i], table)
-      | i `M.member` envFuncs = (Left $ [E.AssigningToFunction s e ident], table)
+    aux i ty e@(Env{..})
+      | i `M.member` envConsts = (Left $ [E.AssigningToConstant s end i], e)
+      | i `M.member` envFuncs = (Left $ [E.AssigningToFunction s end ident], e)
       | otherwise =
         let value = i `M.lookup` envVars in 
         case value of
-          Nothing -> (Left $ [E.UndefinedIdentifier s e i], table)
-          Just correctType | correctType == ty -> (Right ty, table)
-                           | otherwise -> (Left $ [E.IncorrectType s e correctType ty], table)
+          Nothing -> (Left $ [E.UndefinedIdentifier s end i], e)
+          Just correctType | correctType == ty -> (Right ty, e)
+                           | correctType == L.Undef' ->
+                             -- TODO: change this to give a warning.
+                             let nenvVars = M.insert i ty envVars in (Right ty, e{envVars=nenvVars})
+                           | otherwise -> (Left $ [E.IncorrectType s end correctType ty], e)
 
 inferFunc :: L.Func -> Env -> (Either [E.SemErr] L.Type, Env)
 inferFunc (L.Func{..}) env@(Env{..})

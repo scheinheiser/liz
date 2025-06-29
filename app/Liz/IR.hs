@@ -24,7 +24,7 @@ data IROp = IRInt Int
   | IRVar T.Text IROp
   | IRConst T.Text IROp
   | IRFunc T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
-  | IRIf IROp (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
+  | IRIf IROp Goto (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
   | IRLabel Label -- a wrapper around the label for the leader algorithm
   | IRGoto Goto -- a wrapper around goto for control flow/leader algorithm
   deriving Show
@@ -114,8 +114,23 @@ fromSExpr (L.SEReturn _ _ v) i =
   let (ev, ni) = fromSExpr v i in (IRRet ev, ni)
 fromSExpr (L.SEPrint _ _ v) i = 
   let (ev, ni) = fromSExpr v i in (IRPrint ev, ni)
--- NOTE: when going onto if stmts, leave the goto at the of each branch blank.
--- they can be backpatched when leaders have been applied
+fromSExpr (L.SEIfStmt _ _ cond tbranch Nothing) i =
+  let 
+    (econd, ni) = fromSExpr cond i
+    (etbr, fi) = fromSExpr tbranch ni
+    tlabel = T.pack $ "L" <> (show fi)
+    gotomain = "" -- blank goto because labels haven't been applied to the rest.
+  in (IRIf econd gotomain (tlabel, Label (tlabel, [etbr, IRGoto gotomain])) Nothing, fi + 1)
+fromSExpr (L.SEIfStmt _ _ cond tbranch (Just fbranch)) i =
+  let 
+    (econd, ni) = fromSExpr cond i
+    (etbr, ti) = fromSExpr tbranch ni
+    (efbr, fi) = fromSExpr fbranch ti
+    tlabel = T.pack $ "L" <> (show ti)
+    -- ensure that the labels don't clash
+    flabel = T.pack $ "L" <> (show $ ti + 1)
+    gotomain = "" -- blank goto because labels haven't been applied to the rest.
+  in (IRIf econd gotomain (tlabel, Label (tlabel, [etbr, IRGoto gotomain])) (Just (flabel, Label (flabel, [efbr, IRGoto gotomain]))), fi + 1)
 
 -- FIX: some logic issue with the code means that label idx suffixes aren't carried over
 applyLabels :: NE.NonEmpty IROp -> [IROp]
@@ -129,25 +144,24 @@ applyLabels prog =
     labelSuffix i = T.pack $ "L" <> (show i)
 
     aux :: [IROp] -> Label -> [IROp] -> Int -> [IROp]
-    aux [] curr_lbl@(Label (n, exprs)) acc _ = 
+    aux [] curr_lbl@(Label (_, exprs)) acc _ = 
       if length exprs == 0 then acc
                            else (IRLabel curr_lbl) : acc
     aux ((IRFunc ident args fexprs ret) : rest) old_lbl acc i =
       let led_func = IRFunc ident args (applyLabels $ NE.fromList fexprs) ret in
       aux rest (Label (labelSuffix i, [])) (led_func : (IRLabel old_lbl) : acc) (i + 1)
 
-    -- TODO: modify if stmt code to reflect the blank gotos? may or may not be necessary
-    aux ((IRIf cond (goto, (Label (tname, texprs))) Nothing) : rest) old_lbl acc i =
+    aux ((IRIf cond gotomain (goto, (Label (tname, texprs))) Nothing) : rest) old_lbl acc i =
       let 
         led_branch = applyLabels $ NE.fromList texprs 
-        led_ifstmt = IRIf cond (goto, Label (tname, led_branch)) Nothing
+        led_ifstmt = IRIf cond gotomain (goto, Label (tname, led_branch)) Nothing
       in aux rest (Label (labelSuffix i, [])) (led_ifstmt : (IRLabel old_lbl) : acc) (i + 1)
 
-    aux ((IRIf cond (gototrue, (Label (tname, texprs))) (Just (gotofalse, (Label (fname, fexprs))))) : rest) old_lbl acc i =
+    aux ((IRIf cond gotomain (gototrue, (Label (tname, texprs))) (Just (gotofalse, (Label (fname, fexprs))))) : rest) old_lbl acc i =
       let 
         led_tbranch = applyLabels $ NE.fromList texprs 
         led_fbranch = applyLabels $ NE.fromList fexprs
-        led_ifstmt = IRIf cond (gototrue, Label (tname, led_tbranch)) (Just (gotofalse, Label (fname, led_fbranch)))
+        led_ifstmt = IRIf cond gotomain (gototrue, Label (tname, led_tbranch)) (Just (gotofalse, Label (fname, led_fbranch)))
       in aux rest (Label (labelSuffix i, [])) (led_ifstmt : (IRLabel old_lbl) : acc) (i + 1)
 
     aux (goto@(IRGoto _) : rest) old_lbl acc i = aux rest (Label (labelSuffix i, [])) (goto : (IRLabel old_lbl) : acc) (i + 1)

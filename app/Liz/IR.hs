@@ -24,7 +24,9 @@ data IROp = IRInt Int
   | IRVar T.Text IROp
   | IRConst T.Text IROp
   | IRFunc T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
+  | IRFuncCall T.Text [IROp]
   | IRIf IROp Goto (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
+  | IRBlockStmt [IROp]
   | IRLabel Label -- a wrapper around the label for the leader algorithm
   | IRGoto Goto -- a wrapper around goto for control flow/leader algorithm
   deriving Show
@@ -131,6 +133,12 @@ fromSExpr (L.SEIfStmt _ _ cond tbranch (Just fbranch)) i =
     flabel = T.pack $ "L" <> (show $ ti + 1)
     gotomain = "" -- blank goto because labels haven't been applied to the rest.
   in (IRIf econd gotomain (tlabel, Label (tlabel, [etbr, IRGoto gotomain])) (Just (flabel, Label (flabel, [efbr, IRGoto gotomain]))), fi + 1)
+fromSExpr (L.SEFuncCall _ _ ident vals) i =
+  let (eargs, ni) = translateBody vals i in
+  (IRFuncCall ident eargs, ni)
+fromSExpr (L.SEBlockStmt _ _ vals) i =
+  let (ebody, ni) = translateBody vals i in
+  (IRBlockStmt ebody, ni)
 
 -- FIX: some logic issue with the code means that label idx suffixes aren't carried over
 applyLabels :: NE.NonEmpty IROp -> [IROp]

@@ -197,7 +197,9 @@ ppIR prog =
     prettifyIROp (IRUn op v) = (pretty $ unaryToText op) PP.<+> (prettifyIROp v)
     prettifyIROp (IRRet v) = (pretty "ret") PP.<+> (prettifyIROp v)
     prettifyIROp (IRPrint v) = (pretty "print") PP.<+> (prettifyIROp v)
+    prettifyIROp (IRVar i var@(IRVar ident _)) = (prettifyIROp var) <> PP.line <> (pretty "var") PP.<+> (pretty i) PP.<+> (pretty "=") PP.<+> (pretty ident)
     prettifyIROp (IRVar i v) = (pretty "var") PP.<+> (pretty i) PP.<+> (pretty "=") PP.<+> (prettifyIROp v)
+    prettifyIROp (IRVar i const@(IRConst ident _)) = (prettifyIROp const) <> PP.line <> (pretty "const") PP.<+> (pretty i) PP.<+> (pretty "=") PP.<+> (pretty ident)
     prettifyIROp (IRConst i v) = (pretty "const") PP.<+> (pretty i) PP.<+> (pretty "=") PP.<+> (prettifyIROp v)
     prettifyIROp (IRFunc i args body retTy) =
       (pretty i) <> (PP.encloseSep PP.lparen PP.rparen (PP.comma <> PP.space) $ map prettifyArg args) PP.<+> (pretty "->") PP.<+> (PP.viaShow retTy) <> (pretty ":") <> PP.line <> ((PP.indent 2 . PP.vsep) $ map prettifyIROp body)

@@ -308,7 +308,7 @@ parseIfStmt = do
   s <- getCurrentPos
   _ <- string "if"
   hspace
-  cond <- parseSExpr
+  cond <- parseNested
   hspace
   block <- some $ L.lineFold scn $ \_ -> parseSExpr
   e <- getCurrentPos

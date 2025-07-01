@@ -128,7 +128,7 @@ fromSExpr (L.SEIfStmt _ _ cond tbranch (Just fbranch)) i =
     -- no index, as it's assigned in label application to prevent clashing
     label = "L"
     gotomain = "" -- blank goto because labels haven't been applied to the rest.
-  in (IRIf econd gotomain (tlabel, Label (tlabel, [etbr, IRGoto gotomain])) (Just (flabel, Label (flabel, [efbr, IRGoto gotomain]))), fi + 1)
+  in (IRIf econd gotomain (label, Label (label, [etbr, IRGoto gotomain])) (Just (label, Label (label, [efbr, IRGoto gotomain]))), fi + 1)
 fromSExpr (L.SEFuncCall _ _ ident vals) i =
   let (eargs, ni) = translateBody vals i in
   (IRFuncCall ident eargs, ni)
@@ -200,11 +200,19 @@ ppIR prog =
     prettifyIROp (IRVar i v) = (pretty "var") PP.<+> (pretty i) PP.<+> (pretty "=") PP.<+> (prettifyIROp v)
     prettifyIROp (IRConst i v) = (pretty "const") PP.<+> (pretty i) PP.<+> (pretty "=") PP.<+> (prettifyIROp v)
     prettifyIROp (IRFunc i args body retTy) =
-      (pretty i) <> (PP.encloseSep PP.lparen PP.rparen (PP.comma <> PP.space) $ map prettifyArg args) PP.<+> (pretty "->") PP.<+> (PP.viaShow retTy) PP.<+> PP.lbrace <> PP.line <> ((PP.indent 2 . PP.vsep) $ map prettifyIROp body) <> PP.rbrace <> PP.line
+      (pretty i) <> (PP.encloseSep PP.lparen PP.rparen (PP.comma <> PP.space) $ map prettifyArg args) PP.<+> (pretty "->") PP.<+> (PP.viaShow retTy) <> (pretty ":") <> PP.line <> ((PP.indent 2 . PP.vsep) $ map prettifyIROp body)
+    prettifyIROp (IRIf cond@(IRVar i _) gotomain (gototrue, lbl@(Label _)) Nothing) =
+      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty i) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
+    prettifyIROp (IRIf cond@(IRConst i _) gotomain (gototrue, lbl@(Label _)) Nothing) =
+      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty i) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
     prettifyIROp (IRIf cond gotomain (gototrue, lbl@(Label _)) Nothing) =
-      (pretty "if") PP.<+> (prettifyIROp cond) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
+       (pretty "if") PP.<+> (prettifyIROp cond) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
+    prettifyIROp (IRIf cond@(IRVar i _) gotomain (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _)))) =
+      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty i) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (PP.indent 2 ((prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)))
+    prettifyIROp (IRIf cond@(IRConst i _) gotomain (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _)))) =
+      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty i) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (PP.indent 2 ((prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)))
     prettifyIROp (IRIf cond gotomain (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _)))) =
-      (pretty "if") PP.<+> (prettifyIROp cond) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (PP.indent 2 ((prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)))
+       (pretty "if") PP.<+> (prettifyIROp cond) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (PP.indent 2 ((prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)))
     prettifyIROp (IRLabel (Label (name, exprs))) =
       (pretty $ name <> ":") <> PP.line <> ((PP.indent 2 . PP.vcat) $ map prettifyIROp exprs) <> PP.line
     prettifyIROp (IRGoto name) = (pretty "goto") PP.<+> (pretty name)

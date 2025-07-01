@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE NamedDefaults #-}
 {-# LANGUAGE OrPatterns #-}
 
 module Liz.IR where
@@ -8,6 +9,11 @@ import qualified Liz.Common.Types as L
 -- import qualified Liz.Common.Errors as E
 import qualified Data.Text as T
 import qualified Data.List.NonEmpty as NE
+import qualified Prettyprinter as PP
+import Prettyprinter.Render.Text (putDoc)
+
+getOutput :: Either a b -> b
+getOutput (Right x) = x
 
 data IROp = IRInt Int
   | IRBool Bool 
@@ -25,8 +31,8 @@ data IROp = IRInt Int
   | IRConst T.Text IROp
   | IRFunc T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
   | IRFuncCall T.Text [IROp]
-  | IRIf IROp Goto (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
   | IRBlockStmt [IROp]
+  | IRIf IROp Goto (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
   | IRLabel Label -- a wrapper around the label for the leader algorithm
   | IRGoto Goto -- a wrapper around goto for control flow/leader algorithm
   deriving Show
@@ -37,21 +43,11 @@ newtype Label = Label (T.Text, [IROp]) -- name, expressions
 type Goto = T.Text
 
 -- helper functions
-fromComp :: (Eq a, Ord a) => L.BinaryOp -> (a -> a -> Bool)
-fromComp L.Greater = (>)
-fromComp L.Less = (<)
-fromComp L.GreaterEql = (>=)
-fromComp L.LessEql = (<=)
-fromComp L.NotEql = (/=)
-fromComp L.Eql = (==)
-
-fromArith :: Num a => L.BinaryOp -> (a -> a -> a)
-fromArith L.Multiply = (*)
-fromArith L.Subtract = (-)
-fromArith L.Add = (+)
-
 pushExpr :: Label -> IROp -> Label
-pushExpr (Label (n, exprs)) instr = Label (n, reverse (instr : exprs))
+pushExpr (Label (n, exprs)) instr = Label (n, instr : exprs)
+
+mkLabel :: Label
+mkLabel = Label ("", [])
 
 translateBody :: [L.SExpr] -> Int -> ([IROp], Int)
 translateBody l idx = let (res, i) = aux l idx [] in (reverse res, i)
@@ -120,17 +116,17 @@ fromSExpr (L.SEIfStmt _ _ cond tbranch Nothing) i =
   let 
     (econd, ni) = fromSExpr cond i
     (etbr, fi) = fromSExpr tbranch ni
-    tlabel = T.pack $ "L" <> (show fi)
+    -- no index, as it's assigned in label application to prevent clashing
+    label = "L" 
     gotomain = "" -- blank goto because labels haven't been applied to the rest.
-  in (IRIf econd gotomain (tlabel, Label (tlabel, [etbr, IRGoto gotomain])) Nothing, fi + 1)
+  in (IRIf econd gotomain (label, Label (label, [etbr, IRGoto gotomain])) Nothing, fi + 1)
 fromSExpr (L.SEIfStmt _ _ cond tbranch (Just fbranch)) i =
   let 
     (econd, ni) = fromSExpr cond i
     (etbr, ti) = fromSExpr tbranch ni
     (efbr, fi) = fromSExpr fbranch ti
-    tlabel = T.pack $ "L" <> (show ti)
-    -- ensure that the labels don't clash
-    flabel = T.pack $ "L" <> (show $ ti + 1)
+    -- no index, as it's assigned in label application to prevent clashing
+    label = "L"
     gotomain = "" -- blank goto because labels haven't been applied to the rest.
   in (IRIf econd gotomain (tlabel, Label (tlabel, [etbr, IRGoto gotomain])) (Just (flabel, Label (flabel, [efbr, IRGoto gotomain]))), fi + 1)
 fromSExpr (L.SEFuncCall _ _ ident vals) i =
@@ -140,70 +136,102 @@ fromSExpr (L.SEBlockStmt _ _ vals) i =
   let (ebody, ni) = translateBody vals i in
   (IRBlockStmt ebody, ni)
 
--- FIX: some logic issue with the code means that label idx suffixes aren't carried over
-applyLabels :: NE.NonEmpty IROp -> [IROp]
-applyLabels prog = 
-  let
-    label_idx = 0
-    first_lead = Label ((labelSuffix label_idx), [NE.head prog])
-  in aux (NE.drop 1 prog) first_lead [] label_idx
+applyLabels :: NE.NonEmpty IROp -> Int -> ([IROp], Int)
+applyLabels prog i = aux (NE.toList prog) (Label ((labelSuffix i), [])) [] i
   where
     labelSuffix :: Int -> T.Text
-    labelSuffix i = T.pack $ "L" <> (show i)
+    labelSuffix index = "L" <> (T.show index)
 
-    aux :: [IROp] -> Label -> [IROp] -> Int -> [IROp]
-    aux [] curr_lbl@(Label (_, exprs)) acc _ = 
-      if length exprs == 0 then acc
-                           else (IRLabel curr_lbl) : acc
-    aux ((IRFunc ident args fexprs ret) : rest) old_lbl acc i =
-      let led_func = IRFunc ident args (applyLabels $ NE.fromList fexprs) ret in
-      aux rest (Label (labelSuffix i, [])) (led_func : (IRLabel old_lbl) : acc) (i + 1)
-
-    aux ((IRIf cond gotomain (goto, (Label (tname, texprs))) Nothing) : rest) old_lbl acc i =
+    aux :: [IROp] -> Label -> [IROp] -> Int -> ([IROp], Int)
+    aux [] curr_lbl@(Label (_, exprs)) acc idx = 
+      if length exprs == 0 then (acc, idx)
+                           else ((IRLabel curr_lbl) : acc, idx)
+    aux ((IRFunc ident args fexprs ret) : rest) old_lbl acc idx =
       let 
-        led_branch = applyLabels $ NE.fromList texprs 
-        led_ifstmt = IRIf cond gotomain (goto, Label (tname, led_branch)) Nothing
-      in aux rest (Label (labelSuffix i, [])) (led_ifstmt : (IRLabel old_lbl) : acc) (i + 1)
+        (led_body, next_idx) = flip applyLabels idx $ NE.fromList fexprs
+        led_func = IRFunc ident args (reverse led_body) ret in
+      aux rest (Label (labelSuffix $ next_idx + 1, [])) (led_func : acc) (next_idx + 1)
 
-    aux ((IRIf cond gotomain (gototrue, (Label (tname, texprs))) (Just (gotofalse, (Label (fname, fexprs))))) : rest) old_lbl acc i =
-      let 
-        led_tbranch = applyLabels $ NE.fromList texprs 
-        led_fbranch = applyLabels $ NE.fromList fexprs
-        led_ifstmt = IRIf cond gotomain (gototrue, Label (tname, led_tbranch)) (Just (gotofalse, Label (fname, led_fbranch)))
-      in aux rest (Label (labelSuffix i, [])) (led_ifstmt : (IRLabel old_lbl) : acc) (i + 1)
+    aux (IRIf cond gotomain (gototrue, (Label (_, exprs))) Nothing : rest) old_lbl acc idx = 
+      let
+        inc_idx = idx + 1
+        labelled_true = gototrue <> (T.show inc_idx)
+        labelled_if = IRIf cond gotomain (labelled_true, (Label (labelled_true, exprs))) Nothing
+      in aux rest (Label (labelSuffix $ inc_idx + 1, [])) (labelled_if : (IRLabel old_lbl) : acc) (inc_idx + 1)
+    aux (IRIf cond gotomain (gototrue, (Label (_, texprs))) (Just (gotofalse, Label (_, fexprs))) : rest) old_lbl acc idx = 
+      let
+        labelled_true = gototrue <> (T.show $ idx + 1)
+        labelled_false = gotofalse <> (T.show $ idx + 2)
+        labelled_if = IRIf cond gotomain (labelled_true, (Label (labelled_true, texprs))) (Just (labelled_false, Label (labelled_false, fexprs)))
+      in aux rest (Label (labelSuffix $ idx + 3, [])) (labelled_if : (IRLabel old_lbl) : acc) (idx + 3)
 
-    aux (goto@(IRGoto _) : rest) old_lbl acc i = aux rest (Label (labelSuffix i, [])) (goto : (IRLabel old_lbl) : acc) (i + 1)
-    aux (expr : rest) curr_lbl acc i = aux rest (pushExpr curr_lbl expr) acc (i + 1)
+    aux (goto@(IRGoto _) : rest) old_lbl acc idx = aux rest (Label (labelSuffix $ idx + 1, [])) (goto : (IRLabel old_lbl) : acc) (idx + 1)
+    aux (expr : rest) curr_lbl acc idx = aux rest (pushExpr curr_lbl expr) acc idx
 
 programToIR :: L.Program -> [IROp]
-programToIR (L.Program sexprs) = applyLabels $ NE.fromList $ reverse $ naiveConv sexprs 0
+programToIR (L.Program sexprs) = 
+  let 
+    (conv, _) = naiveConv sexprs 0 []
+    (res, _) = applyLabels (NE.fromList conv) 0
+  in res
   where
-    naiveConv :: [L.SExpr] -> Int -> [IROp]
-    naiveConv [] _ = []
-    naiveConv (x : xs) i = let (instr, ni) = fromSExpr x i in instr : naiveConv xs ni
+    naiveConv :: [L.SExpr] -> Int -> [IROp] -> ([IROp], Int)
+    naiveConv [] i acc = (acc, i)
+    naiveConv (x : xs) i acc = let (instr, ni) = fromSExpr x i in naiveConv xs ni (instr : acc)
 
--- main optimisation functions
-foldExpr :: IROp -> IROp
-foldExpr l@(IRInt _; IRFloat _; IRString _; IRChar _; IRBool _) = l
-foldExpr op@(IRBin p@(L.Add; L.Subtract; L.Multiply) l r) =
-  case (l, r) of
-    (IRInt lop, IRInt rop) -> let arith = fromArith p in IRInt (arith lop rop)
-    (IRFloat lop, IRFloat rop) -> let arith = fromArith p in IRFloat (arith lop rop)
-    _ -> op
-foldExpr op@(IRBin L.Divide l r) =
-  case (l, r) of
-    (IRInt lop, IRInt rop) -> IRInt (div lop rop)
-    (IRFloat lop, IRFloat rop) -> IRFloat (lop / rop)
-    _ -> op
-foldExpr op@(IRBin p@(L.Greater; L.Less; L.LessEql; L.GreaterEql; L.NotEql; L.Eql) l r) =
-  case (l, r) of
-    (IRInt lop, IRInt rop) -> let comp = fromComp p in IRBool (comp lop rop)
-    (IRFloat lop, IRFloat rop) -> let comp = fromComp p in IRBool (comp lop rop)
-    (IRString lop, IRString rop) -> let comp = fromComp p in IRBool (comp lop rop)
-    (IRChar lop, IRChar rop) -> let comp = fromComp p in IRBool (comp lop rop)
-    (IRBool lop, IRBool rop) -> let comp = fromComp p in IRBool (comp lop rop)
-    _ -> op
-foldExpr op@(IRBin L.Concat l r) =
-  case (l, r) of
-    (IRString lop, IRString rop) -> IRString (lop <> rop)
-    _ -> op
+ppIR :: L.Program -> IO ()
+ppIR prog =
+  let progIR = programToIR prog in
+  putDoc $ PP.sep $ map prettifyIROp progIR
+  where
+    prettifyIROp :: IROp -> PP.Doc T.Text
+    prettifyIROp (IRInt v) = PP.viaShow v
+    prettifyIROp (IRFloat v) = PP.viaShow v
+    prettifyIROp (IRBool v) = PP.viaShow v
+    prettifyIROp (IRString v) = PP.viaShow v
+    prettifyIROp (IRChar v) = PP.viaShow v
+    prettifyIROp (IRUndef) = pretty "undefined"
+    prettifyIROp (IRUnit) = pretty "()"
+    prettifyIROp (IRIdent i) = pretty i
+    prettifyIROp (IRBin op l r) = (prettifyIROp l) PP.<+> (pretty $ binaryToText op) PP.<+> (prettifyIROp r)
+    prettifyIROp (IRUn op v) = (pretty $ unaryToText op) PP.<+> (prettifyIROp v)
+    prettifyIROp (IRRet v) = (pretty "ret") PP.<+> (prettifyIROp v)
+    prettifyIROp (IRPrint v) = (pretty "print") PP.<+> (prettifyIROp v)
+    prettifyIROp (IRVar i v) = (pretty "var") PP.<+> (pretty i) PP.<+> (pretty "=") PP.<+> (prettifyIROp v)
+    prettifyIROp (IRConst i v) = (pretty "const") PP.<+> (pretty i) PP.<+> (pretty "=") PP.<+> (prettifyIROp v)
+    prettifyIROp (IRFunc i args body retTy) =
+      (pretty i) <> (PP.encloseSep PP.lparen PP.rparen (PP.comma <> PP.space) $ map prettifyArg args) PP.<+> (pretty "->") PP.<+> (PP.viaShow retTy) PP.<+> PP.lbrace <> PP.line <> ((PP.indent 2 . PP.vsep) $ map prettifyIROp body) <> PP.rbrace <> PP.line
+    prettifyIROp (IRIf cond gotomain (gototrue, lbl@(Label _)) Nothing) =
+      (pretty "if") PP.<+> (prettifyIROp cond) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
+    prettifyIROp (IRIf cond gotomain (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _)))) =
+      (pretty "if") PP.<+> (prettifyIROp cond) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (PP.indent 2 ((prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)))
+    prettifyIROp (IRLabel (Label (name, exprs))) =
+      (pretty $ name <> ":") <> PP.line <> ((PP.indent 2 . PP.vcat) $ map prettifyIROp exprs) <> PP.line
+    prettifyIROp (IRGoto name) = (pretty "goto") PP.<+> (pretty name)
+    prettifyIROp (IRFuncCall i exprs) = 
+      (pretty i) <> ((PP.parens . PP.hsep . PP.punctuate PP.comma) $ map prettifyIROp exprs)
+    prettifyIROp (IRBlockStmt exprs) = 
+      (pretty "block") PP.<+> PP.lbrace <> PP.line <> ((PP.indent 2 . PP.vsep) $ map prettifyIROp exprs) <> PP.line <> PP.rbrace <> PP.line
+
+    prettifyArg :: L.Arg -> PP.Doc T.Text
+    prettifyArg (L.Arg {argIdent=name, argType=ty}) = (pretty $ name <> ":") PP.<+> (PP.viaShow ty)
+
+    pretty :: T.Text -> PP.Doc ann
+    pretty = PP.pretty @T.Text
+
+    binaryToText :: L.BinaryOp -> T.Text
+    binaryToText L.Add = "+"
+    binaryToText L.Subtract = "-"
+    binaryToText L.Multiply = "*"
+    binaryToText L.Divide = "/"
+    binaryToText L.Greater = ">"
+    binaryToText L.GreaterEql = ">="
+    binaryToText L.Less = "<"
+    binaryToText L.LessEql = "<="
+    binaryToText L.Eql = "=="
+    binaryToText L.NotEql = "!="
+    binaryToText L.Concat = "++"
+
+    unaryToText :: L.UnaryOp -> T.Text
+    unaryToText L.Not = "not"
+    unaryToText L.Negate = "negate"

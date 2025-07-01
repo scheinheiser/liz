@@ -49,7 +49,7 @@ testing :: L.Program -> FilePath -> IO ()
 testing (L.Program prog) f = do
   let
   -- TODO: check that there's only one main function
-    (res, hasMain) = aux (filter (L.SEComment ==) prog) mkEnv 0 []
+    (res, hasMain) = aux (filter (L.SEComment /=) prog) mkEnv 0 []
     (errs, _) = collectErrors res [] []
   case () of _
               | length errs /= 0 && hasMain > 1 -> Log.printErrs f (E.MultipleEntrypoints : errs) []

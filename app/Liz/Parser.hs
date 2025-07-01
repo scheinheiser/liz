@@ -339,4 +339,11 @@ parseFile :: FilePath -> T.Text -> Either (ParseErrorBundle T.Text E.PError) Pro
 parseFile f fc = do
   case (parse parseProgram f fc) of
     (Left err) -> Left err
-    (Right v) -> Right $ Program v
+    (Right v) -> Right $ Program (removeComments v)
+  where
+    removeComments :: [SExpr] -> [SExpr]
+    removeComments [] = []
+    removeComments (SEComment : rest) = removeComments rest
+    removeComments (SEFunc func@(Func{funcBody=body}) : rest) = SEFunc func{funcBody=filter (SEComment /=) body} : removeComments rest
+    removeComments (SEBlockStmt s e body : rest) = SEBlockStmt s e (filter (SEComment /=) body) : removeComments rest
+    removeComments (expr : rest) = expr : removeComments rest

@@ -6,9 +6,7 @@
 module Liz.IR where
 
 import qualified Liz.Common.Types as L
--- import qualified Liz.Common.Errors as E
 import qualified Data.Text as T
-import qualified Data.List.NonEmpty as NE
 import qualified Prettyprinter as PP
 import Prettyprinter.Render.Text (putDoc)
 
@@ -37,17 +35,13 @@ data IROp = IRInt Int
   | IRGoto Goto -- a wrapper around goto for control flow/leader algorithm
   deriving Show
 
+type Goto = T.Text
 newtype Label = Label (T.Text, [IROp]) -- name, expressions
   deriving Show
-
-type Goto = T.Text
 
 -- helper functions
 pushExpr :: Label -> IROp -> Label
 pushExpr (Label (n, exprs)) instr = Label (n, instr : exprs)
-
-mkLabel :: Label
-mkLabel = Label ("", [])
 
 translateBody :: [L.SExpr] -> Int -> ([IROp], Int)
 translateBody l idx = let (res, i) = aux l idx [] in (reverse res, i)
@@ -136,43 +130,47 @@ fromSExpr (L.SEBlockStmt _ _ vals) i =
   let (ebody, ni) = translateBody vals i in
   (IRBlockStmt ebody, ni)
 
-applyLabels :: NE.NonEmpty IROp -> Int -> ([IROp], Int)
-applyLabels prog i = aux (NE.toList prog) (Label ((labelSuffix i), [])) [] i
+applyLabels :: [IROp] -> Int -> ([IROp], Int)
+applyLabels prog i = aux prog (Label ((labelSuffix i), [])) [] i
   where
     labelSuffix :: Int -> T.Text
     labelSuffix index = "L" <> (T.show index)
 
     aux :: [IROp] -> Label -> [IROp] -> Int -> ([IROp], Int)
-    aux [] curr_lbl@(Label (_, exprs)) acc idx = 
+    aux [] (Label (n, exprs)) acc idx = 
       if length exprs == 0 then (acc, idx)
-                           else ((IRLabel curr_lbl) : acc, idx)
-    aux ((IRFunc ident args fexprs ret) : rest) old_lbl acc idx =
+                           else ((IRLabel $ Label (n, reverse exprs)) : acc, idx)
+    aux ((IRFunc ident args fexprs ret) : rest) old_lbl@(Label (_, exprs)) acc idx =
       let 
-        (led_body, next_idx) = flip applyLabels idx $ NE.fromList fexprs
-        led_func = IRFunc ident args (reverse led_body) ret in
-      aux rest (Label (labelSuffix $ next_idx + 1, [])) (led_func : acc) (next_idx + 1)
+        (led_body, next_idx) = applyLabels fexprs idx
+        led_func = IRFunc ident args (reverse led_body) ret 
+      in if length exprs == 0 then aux rest (Label (labelSuffix $ next_idx + 1, [])) (led_func : acc) (next_idx + 1)
+         else aux rest (Label (labelSuffix $ next_idx + 1, [])) (led_func : (IRLabel old_lbl) : acc) (next_idx + 1)
 
-    aux (IRIf cond gotomain (gototrue, (Label (_, exprs))) Nothing : rest) old_lbl acc idx = 
+    aux (IRIf cond gotomain (gototrue, (Label (_, exprs))) Nothing : rest) old_lbl@(Label (_, label_exprs)) acc idx = 
       let
-        inc_idx = idx + 1
-        labelled_true = gototrue <> (T.show inc_idx)
+        labelled_true = gototrue <> (T.show $ idx + 1)
         labelled_if = IRIf cond gotomain (labelled_true, (Label (labelled_true, exprs))) Nothing
-      in aux rest (Label (labelSuffix $ inc_idx + 1, [])) (labelled_if : (IRLabel old_lbl) : acc) (inc_idx + 1)
-    aux (IRIf cond gotomain (gototrue, (Label (_, texprs))) (Just (gotofalse, Label (_, fexprs))) : rest) old_lbl acc idx = 
+      in if length label_exprs == 0 then aux rest (Label (labelSuffix $ idx + 2, [])) (labelled_if : acc) (idx + 2)
+         else aux rest (Label (labelSuffix $ idx + 2, [])) (labelled_if : (IRLabel old_lbl) : acc) (idx + 2)
+    aux (IRIf cond gotomain (gototrue, (Label (_, texprs))) (Just (gotofalse, Label (_, fexprs))) : rest) old_lbl@(Label (_, label_exprs)) acc idx = 
       let
         labelled_true = gototrue <> (T.show $ idx + 1)
         labelled_false = gotofalse <> (T.show $ idx + 2)
         labelled_if = IRIf cond gotomain (labelled_true, (Label (labelled_true, texprs))) (Just (labelled_false, Label (labelled_false, fexprs)))
-      in aux rest (Label (labelSuffix $ idx + 3, [])) (labelled_if : (IRLabel old_lbl) : acc) (idx + 3)
+      in if length label_exprs == 0 then aux rest (Label (labelSuffix $ idx + 3, [])) (labelled_if : acc) (idx + 3)
+         else aux rest (Label (labelSuffix $ idx + 3, [])) (labelled_if : (IRLabel old_lbl) : acc) (idx + 3)
 
-    aux (goto@(IRGoto _) : rest) old_lbl acc idx = aux rest (Label (labelSuffix $ idx + 1, [])) (goto : (IRLabel old_lbl) : acc) (idx + 1)
+    aux (goto@(IRGoto _) : rest) old_lbl@(Label (_, exprs)) acc idx = 
+      if length exprs == 0 then aux rest (Label (labelSuffix $ idx + 1, [])) (goto : acc) (idx + 1)
+                           else aux rest (Label (labelSuffix $ idx + 1, [])) (goto : (IRLabel old_lbl) : acc) (idx + 1)
     aux (expr : rest) curr_lbl acc idx = aux rest (pushExpr curr_lbl expr) acc idx
 
 programToIR :: L.Program -> [IROp]
 programToIR (L.Program sexprs) = 
   let 
     (conv, _) = naiveConv sexprs 0 []
-    (res, _) = applyLabels (NE.fromList conv) 0
+    (res, _) = applyLabels conv 0
   in res
   where
     naiveConv :: [L.SExpr] -> Int -> [IROp] -> ([IROp], Int)
@@ -193,35 +191,62 @@ ppIR prog =
     prettifyIROp (IRUndef) = pretty "undefined"
     prettifyIROp (IRUnit) = pretty "()"
     prettifyIROp (IRIdent i) = pretty i
-    prettifyIROp (IRBin op l r) = (prettifyIROp l) PP.<+> (pretty $ binaryToText op) PP.<+> (prettifyIROp r)
-    prettifyIROp (IRUn op v) = (pretty $ unaryToText op) PP.<+> (prettifyIROp v)
-    prettifyIROp (IRRet v) = (pretty "ret") PP.<+> (prettifyIROp v)
-    prettifyIROp (IRPrint v) = (pretty "print") PP.<+> (prettifyIROp v)
-    prettifyIROp (IRVar i var@(IRVar ident _)) = (prettifyIROp var) <> PP.line <> (pretty "var") PP.<+> (pretty i) PP.<+> (pretty "=") PP.<+> (pretty ident)
-    prettifyIROp (IRVar i v) = (pretty "var") PP.<+> (pretty i) PP.<+> (pretty "=") PP.<+> (prettifyIROp v)
-    prettifyIROp (IRVar i const@(IRConst ident _)) = (prettifyIROp const) <> PP.line <> (pretty "const") PP.<+> (pretty i) PP.<+> (pretty "=") PP.<+> (pretty ident)
-    prettifyIROp (IRConst i v) = (pretty "const") PP.<+> (pretty i) PP.<+> (pretty "=") PP.<+> (prettifyIROp v)
+    prettifyIROp (IRBin op l r) = formatBinary op l r
+    prettifyIROp (IRUn op v) = formatUnary op v
+    prettifyIROp (IRRet v) = formatPrintOrRet "ret" v
+    prettifyIROp (IRPrint v) = formatPrintOrRet "print" v
+    prettifyIROp (IRVar i v) = formatVar "var" i v
+    prettifyIROp (IRConst i v) = formatVar "const" i v
     prettifyIROp (IRFunc i args body retTy) =
       (pretty i) <> (PP.encloseSep PP.lparen PP.rparen (PP.comma <> PP.space) $ map prettifyArg args) PP.<+> (pretty "->") PP.<+> (PP.viaShow retTy) <> (pretty ":") <> PP.line <> ((PP.indent 2 . PP.vsep) $ map prettifyIROp body)
-    prettifyIROp (IRIf cond@(IRVar i _) gotomain (gototrue, lbl@(Label _)) Nothing) =
-      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty i) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
-    prettifyIROp (IRIf cond@(IRConst i _) gotomain (gototrue, lbl@(Label _)) Nothing) =
-      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty i) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
-    prettifyIROp (IRIf cond gotomain (gototrue, lbl@(Label _)) Nothing) =
-       (pretty "if") PP.<+> (prettifyIROp cond) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
-    prettifyIROp (IRIf cond@(IRVar i _) gotomain (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _)))) =
-      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty i) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (PP.indent 2 ((prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)))
-    prettifyIROp (IRIf cond@(IRConst i _) gotomain (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _)))) =
-      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty i) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (PP.indent 2 ((prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)))
-    prettifyIROp (IRIf cond gotomain (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _)))) =
-       (pretty "if") PP.<+> (prettifyIROp cond) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (PP.indent 2 ((prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)))
+    prettifyIROp (IRIf cond gotomain truebranch falsebranch) = formatIfStmt cond gotomain truebranch falsebranch
     prettifyIROp (IRLabel (Label (name, exprs))) =
       (pretty $ name <> ":") <> PP.line <> ((PP.indent 2 . PP.vcat) $ map prettifyIROp exprs) <> PP.line
     prettifyIROp (IRGoto name) = (pretty "goto") PP.<+> (pretty name)
     prettifyIROp (IRFuncCall i exprs) = 
       (pretty i) <> ((PP.parens . PP.hsep . PP.punctuate PP.comma) $ map prettifyIROp exprs)
     prettifyIROp (IRBlockStmt exprs) = 
-      (pretty "block") PP.<+> PP.lbrace <> PP.line <> ((PP.indent 2 . PP.vsep) $ map prettifyIROp exprs) <> PP.line <> PP.rbrace <> PP.line
+      (pretty "block:") <> PP.line <> ((PP.indent 2 . PP.vsep) $ map prettifyIROp exprs) <> PP.line
+
+    formatBinary :: L.BinaryOp -> IROp -> IROp -> PP.Doc T.Text
+    formatBinary op l@(IRVar li _) r@(IRVar ri _) = (prettifyIROp l) <> PP.line <> (prettifyIROp r) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)
+    formatBinary op l@(IRConst li _) r@(IRConst ri _) = (prettifyIROp l) <> PP.line <> (prettifyIROp r) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)
+    formatBinary op l@(IRVar li _) r@(IRConst ri _) = (prettifyIROp l) <> PP.line <> (prettifyIROp r) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)
+    formatBinary op l@(IRConst li _) r@(IRVar ri _) = (prettifyIROp l) <> PP.line <> (prettifyIROp r) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)
+    formatBinary op l@(IRVar li _) r = (prettifyIROp l) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (prettifyIROp r)
+    formatBinary op l@(IRConst li _) r = (prettifyIROp l) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (prettifyIROp r)
+    formatBinary op l r@(IRVar ri _) = (prettifyIROp r) <> PP.line <> (prettifyIROp l) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)
+    formatBinary op l r@(IRConst ri _) = (prettifyIROp r) <> PP.line <> (prettifyIROp l) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)
+    formatBinary op l r = (prettifyIROp l) PP.<+> (pretty $ binaryToText op) PP.<+> (prettifyIROp r)
+
+    formatUnary :: L.UnaryOp -> IROp -> PP.Doc T.Text
+    formatUnary op v@(IRVar i _) = (prettifyIROp v) <> PP.line <> (pretty $ unaryToText op) PP.<+> (pretty i)
+    formatUnary op v@(IRConst i _) = (prettifyIROp v) <> PP.line <> (pretty $ unaryToText op) PP.<+> (pretty i)
+    formatUnary op v = (pretty $ unaryToText op) PP.<+> (prettifyIROp v)
+
+    formatPrintOrRet :: T.Text -> IROp -> PP.Doc T.Text
+    formatPrintOrRet dec v@(IRVar i _) = (prettifyIROp v) <> PP.line <> (pretty dec) PP.<+> (pretty i)
+    formatPrintOrRet dec v@(IRConst i _) = (prettifyIROp v) <> PP.line <> (pretty dec) PP.<+> (pretty i)
+    formatPrintOrRet dec v = (pretty dec) PP.<+> (prettifyIROp v)
+
+    formatVar :: T.Text -> T.Text -> IROp -> PP.Doc T.Text
+    formatVar dec ident v@(IRVar i _) = (prettifyIROp v) <> PP.line <> (pretty dec) PP.<+> (pretty ident) PP.<+> (pretty "=") PP.<+> (pretty i)
+    formatVar dec ident v@(IRConst i _) = (prettifyIROp v) <> PP.line <> (pretty dec) PP.<+> (pretty ident) PP.<+> (pretty "=") PP.<+> (pretty i)
+    formatVar dec ident v = (pretty dec) PP.<+> (pretty ident) PP.<+> (pretty "=") PP.<+> (prettifyIROp v)
+
+    formatIfStmt :: IROp -> Goto -> (Goto, Label) -> Maybe (Goto, Label) -> PP.Doc T.Text
+    formatIfStmt cond@(IRVar ident _) gotomain (gototrue, lbl@(Label _)) Nothing =
+      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty ident) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
+    formatIfStmt cond@(IRConst ident _) gotomain (gototrue, lbl@(Label _)) Nothing =
+      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty ident) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
+    formatIfStmt cond gotomain (gototrue, lbl@(Label _)) Nothing =
+      (pretty "if") PP.<+> (prettifyIROp cond) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
+    formatIfStmt cond@(IRVar i _) _ (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _))) =
+      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty i) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)
+    formatIfStmt cond@(IRConst i _) _ (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _))) =
+      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty i) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)
+    formatIfStmt cond _ (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _))) =
+      (pretty "if") PP.<+> (prettifyIROp cond) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)
 
     prettifyArg :: L.Arg -> PP.Doc T.Text
     prettifyArg (L.Arg {argIdent=name, argType=ty}) = (pretty $ name <> ":") PP.<+> (PP.viaShow ty)

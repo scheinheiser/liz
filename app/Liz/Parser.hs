@@ -111,20 +111,20 @@ parseUndefined = string "undefined"
 
 parseStr :: Parser T.Text
 parseStr = do
-  d1 <- char '"'
+  _ <- char '"'
   str <- takeWhile1P (Just "alphanumeric character.") valid
-  d2 <- char '"'
-  pure $ (d1 T.:< str) T.:> d2
+  _ <- char '"'
+  pure str
   where
     valid :: Char -> Bool
     valid = liftA2 (&&) isPrint ('"' /=)
 
 parseChar :: Parser T.Text
 parseChar = do
-  d1 <- char '\''
+  _ <- char '\''
   c <- printChar
-  d2 <- char '\''
-  pure $ T.pack [d1, c, d2]
+  _ <- char '\''
+  pure $ T.pack [c]
 
 parseNum :: Parser (LizPos -> LizPos -> SExpr)
 parseNum = do

@@ -184,6 +184,19 @@ patchJumps l = aux $ NE.toList l
   where
     aux :: [IROp] -> [IROp]
     aux [] = []
+    aux [(IRIf cond _ (gototrue, Label (_, exprs)) Nothing)] =
+      let 
+        endlbl = IRLabel $ Label ("end", [IRRet IRUnit])
+        patched_exprs = (init exprs) ++ [IRGoto "end"] 
+      in
+      IRIf cond "end" (gototrue, Label (gototrue, patched_exprs)) Nothing : endlbl : []
+    aux [(IRIf cond _ (gototrue, Label (_, texprs)) (Just (gotofalse, Label (_, fexprs))))] =
+      let 
+        endlbl = IRLabel $ Label ("end", [IRRet IRUnit])
+        patched_texprs = (init texprs) ++ [IRGoto "end"] 
+        patched_fexprs = (init fexprs) ++ [IRGoto "end"] 
+      in
+      IRIf cond "end" (gototrue, Label (gototrue, patched_texprs)) (Just (gotofalse, Label (gotofalse, patched_fexprs))) : endlbl : []
     aux ((IRIf cond _ (gototrue, Label (_, exprs)) Nothing) : next@(IRLabel (Label (n, _))) : rest) =
       let patched_exprs = (init exprs) ++ [IRGoto n] in
       IRIf cond n (gototrue, Label (gototrue, patched_exprs)) Nothing : next : (aux rest)
@@ -212,7 +225,7 @@ programToIR (L.Program sexprs) =
 ppIR :: L.Program -> IO ()
 ppIR prog =
   let (progIR, ir) = programToIR prog in
-  putDoc $ PP.sep $ (map prettifyIROp progIR) <> [formatTracker ir]
+  putDoc $ PP.sep $ (map prettifyIROp progIR) <> [border, formatTracker ir]
   where
     prettifyIROp :: IROp -> PP.Doc T.Text
     prettifyIROp (IRInt v) = PP.viaShow v
@@ -239,6 +252,9 @@ ppIR prog =
       (pretty i) <> ((PP.parens . PP.hsep . PP.punctuate PP.comma) $ map prettifyIROp exprs)
     prettifyIROp (IRBlockStmt exprs) = 
       (pretty "block:") <> PP.line <> ((PP.indent 2 . PP.vcat) $ map prettifyIROp exprs)
+
+    border :: PP.Doc T.Text
+    border = (PP.pretty $ replicate 30 '-') <> PP.line
 
     formatBinary :: L.BinaryOp -> IROp -> IROp -> PP.Doc T.Text
     formatBinary op l@(IRVar li _) r@(IRVar ri _) = (prettifyIROp l) <> PP.line <> (prettifyIROp r) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)

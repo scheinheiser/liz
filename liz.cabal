@@ -20,7 +20,9 @@ executable liz
       , Liz.Common.Logging
       , Liz.Sema
       , Liz.Codegen
-      , Liz.IR
+      , Liz.IR.IR
+      , Liz.IR.IRTypes
+      , Liz.QBE.QBE
     other-extensions: OverloadedStrings
       , NamedDefaults
       , RecordWildCards
@@ -42,7 +44,9 @@ test-suite liz-test
       , Liz.ParserSpec
       , Liz.Sema
       , Liz.Codegen
-      , Liz.IR
+      , Liz.IR.IR
+      , Liz.IR.IRTypes
+      , Liz.QBE.QBE
       , Liz.SemaSpec
       , Liz.Common.Errors
       , Liz.Common.Logging

@@ -2,47 +2,19 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OrPatterns #-}
 
-module Liz.IR where
+module Liz.IR.IR (ppIR, programToIR) where
 
+import Liz.IR.IRTypes
 import qualified Liz.Common.Types as L
+
 import qualified Data.Text as T
 import qualified Data.List.NonEmpty as NE
+
 import qualified Prettyprinter as PP
 import Prettyprinter.Render.Text (putDoc)
 
 getOutput :: Either a b -> b
 getOutput (Right x) = x
-
-data IR = IR 
-  { irAllocatedStrings :: [T.Text]
-  , irStringIdx :: Int
-  } deriving Show
-
-data IROp = IRInt Int
-  | IRBool Bool 
-  | IRFloat Double
-  | IRString T.Text
-  | IRChar Char 
-  | IRUnit
-  | IRUndef
-  | IRIdent T.Text
-  | IRBin L.BinaryOp IROp IROp
-  | IRUn L.UnaryOp IROp
-  | IRRet IROp
-  | IRPrint IROp
-  | IRVar T.Text IROp
-  | IRConst T.Text IROp
-  | IRFunc T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
-  | IRFuncCall T.Text [IROp]
-  | IRBlockStmt [IROp]
-  | IRIf IROp Goto (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
-  | IRLabel Label -- a wrapper around the label for the leader algorithm
-  | IRGoto Goto -- a wrapper around goto for control flow/leader algorithm
-  deriving Show
-
-type Goto = T.Text
-newtype Label = Label (T.Text, [IROp]) -- name, expressions
-  deriving Show
 
 -- helper functions
 pushExpr :: Label -> IROp -> Label
@@ -225,105 +197,16 @@ programToIR (L.Program sexprs) =
 ppIR :: L.Program -> IO ()
 ppIR prog =
   let (progIR, ir) = programToIR prog in
-  putDoc $ PP.sep $ (map prettifyIROp progIR) <> [border, formatTracker ir]
+  putDoc $ PP.sep $ (map PP.pretty progIR) <> [border, formatTracker ir]
   where
-    prettifyIROp :: IROp -> PP.Doc T.Text
-    prettifyIROp (IRInt v) = PP.viaShow v
-    prettifyIROp (IRFloat v) = PP.viaShow v
-    prettifyIROp (IRBool v) = PP.viaShow v
-    prettifyIROp (IRString v) = (pretty "string[") <> (pretty v) <> (pretty "]")
-    prettifyIROp (IRChar v) = PP.viaShow v
-    prettifyIROp (IRUndef) = pretty "undefined"
-    prettifyIROp (IRUnit) = pretty "()"
-    prettifyIROp (IRIdent i) = pretty i
-    prettifyIROp (IRBin op l r) = formatBinary op l r
-    prettifyIROp (IRUn op v) = formatUnary op v
-    prettifyIROp (IRRet v) = formatPrintOrRet "ret" v
-    prettifyIROp (IRPrint v) = formatPrintOrRet "print" v
-    prettifyIROp (IRVar i v) = formatVar "var" i v
-    prettifyIROp (IRConst i v) = formatVar "const" i v
-    prettifyIROp (IRFunc i args body retTy) =
-      (pretty i) <> (PP.encloseSep PP.lparen PP.rparen (PP.comma <> PP.space) $ map prettifyArg args) PP.<+> (pretty "->") PP.<+> (PP.viaShow retTy) <> (pretty ":") <> PP.line <> ((PP.indent 2 . PP.vcat) $ map prettifyIROp body)
-    prettifyIROp (IRIf cond gotomain truebranch falsebranch) = formatIfStmt cond gotomain truebranch falsebranch
-    prettifyIROp (IRLabel (Label (name, exprs))) =
-      (pretty $ name <> ":") <> PP.line <> ((PP.indent 2 . PP.vcat) $ map prettifyIROp exprs) <> PP.line
-    prettifyIROp (IRGoto name) = (pretty "goto") PP.<+> (pretty name)
-    prettifyIROp (IRFuncCall i exprs) = 
-      (pretty i) <> ((PP.parens . PP.hsep . PP.punctuate PP.comma) $ map prettifyIROp exprs)
-    prettifyIROp (IRBlockStmt exprs) = 
-      (pretty "block:") <> PP.line <> ((PP.indent 2 . PP.vcat) $ map prettifyIROp exprs)
-
     border :: PP.Doc T.Text
-    border = (PP.pretty $ replicate 30 '-') <> PP.line
-
-    formatBinary :: L.BinaryOp -> IROp -> IROp -> PP.Doc T.Text
-    formatBinary op l@(IRVar li _) r@(IRVar ri _) = (prettifyIROp l) <> PP.line <> (prettifyIROp r) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)
-    formatBinary op l@(IRConst li _) r@(IRConst ri _) = (prettifyIROp l) <> PP.line <> (prettifyIROp r) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)
-    formatBinary op l@(IRVar li _) r@(IRConst ri _) = (prettifyIROp l) <> PP.line <> (prettifyIROp r) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)
-    formatBinary op l@(IRConst li _) r@(IRVar ri _) = (prettifyIROp l) <> PP.line <> (prettifyIROp r) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)
-    formatBinary op l@(IRVar li _) r = (prettifyIROp l) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (prettifyIROp r)
-    formatBinary op l@(IRConst li _) r = (prettifyIROp l) <> PP.line <> (pretty li) PP.<+> (pretty $ binaryToText op) PP.<+> (prettifyIROp r)
-    formatBinary op l r@(IRVar ri _) = (prettifyIROp r) <> PP.line <> (prettifyIROp l) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)
-    formatBinary op l r@(IRConst ri _) = (prettifyIROp r) <> PP.line <> (prettifyIROp l) PP.<+> (pretty $ binaryToText op) PP.<+> (pretty ri)
-    formatBinary op l r = (prettifyIROp l) PP.<+> (pretty $ binaryToText op) PP.<+> (prettifyIROp r)
-
-    formatUnary :: L.UnaryOp -> IROp -> PP.Doc T.Text
-    formatUnary op v@(IRVar i _) = (prettifyIROp v) <> PP.line <> (pretty $ unaryToText op) PP.<+> (pretty i)
-    formatUnary op v@(IRConst i _) = (prettifyIROp v) <> PP.line <> (pretty $ unaryToText op) PP.<+> (pretty i)
-    formatUnary op v = (pretty $ unaryToText op) PP.<+> (prettifyIROp v)
-
-    formatPrintOrRet :: T.Text -> IROp -> PP.Doc T.Text
-    formatPrintOrRet dec v@(IRVar i _) = (prettifyIROp v) <> PP.line <> (pretty dec) PP.<+> (pretty i)
-    formatPrintOrRet dec v@(IRConst i _) = (prettifyIROp v) <> PP.line <> (pretty dec) PP.<+> (pretty i)
-    formatPrintOrRet dec v = (pretty dec) PP.<+> (prettifyIROp v)
-
-    formatVar :: T.Text -> T.Text -> IROp -> PP.Doc T.Text
-    formatVar dec ident v@(IRVar i _) = (prettifyIROp v) <> PP.line <> (pretty dec) PP.<+> (pretty ident) PP.<+> (pretty "=") PP.<+> (pretty i)
-    formatVar dec ident v@(IRConst i _) = (prettifyIROp v) <> PP.line <> (pretty dec) PP.<+> (pretty ident) PP.<+> (pretty "=") PP.<+> (pretty i)
-    formatVar dec ident v = (pretty dec) PP.<+> (pretty ident) PP.<+> (pretty "=") PP.<+> (prettifyIROp v)
-
-    formatIfStmt :: IROp -> Goto -> (Goto, Label) -> Maybe (Goto, Label) -> PP.Doc T.Text
-    formatIfStmt cond@(IRVar ident _) gotomain (gototrue, lbl@(Label _)) Nothing =
-      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty ident) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
-    formatIfStmt cond@(IRConst ident _) gotomain (gototrue, lbl@(Label _)) Nothing =
-      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty ident) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
-    formatIfStmt cond gotomain (gototrue, lbl@(Label _)) Nothing =
-      (pretty "if") PP.<+> (prettifyIROp cond) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotomain) <> PP.line <> (prettifyIROp $ IRLabel lbl)
-    formatIfStmt cond@(IRVar i _) _ (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _))) =
-      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty i) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)
-    formatIfStmt cond@(IRConst i _) _ (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _))) =
-      (prettifyIROp cond) <> PP.line <> (pretty "if") PP.<+> (pretty i) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)
-    formatIfStmt cond _ (gototrue, tlbl@(Label _)) (Just (gotofalse, flbl@(Label _))) =
-      (pretty "if") PP.<+> (prettifyIROp cond) PP.<+> (pretty "then goto") PP.<+> (pretty gototrue) PP.<+> (pretty "else goto") PP.<+> (pretty gotofalse) <> PP.line <> (prettifyIROp $ IRLabel tlbl) PP.<+> (prettifyIROp $ IRLabel flbl)
+    border = (PP.pretty @T.Text $ T.pack $ replicate 30 '-') <> PP.line
 
     formatTracker :: IR -> PP.Doc T.Text
     formatTracker IR{irAllocatedStrings=strs} =
-      (pretty "DATA:") <> PP.line <> ((PP.indent 2 . PP.vsep) $ formatAllocStrs strs 0) <> PP.line
+      (PP.pretty @T.Text "DATA:") <> PP.line <> ((PP.indent 2 . PP.vsep) $ formatAllocStrs strs 0) <> PP.line
 
     formatAllocStrs :: [T.Text] -> Int -> [PP.Doc T.Text]
     formatAllocStrs [] _ = []
     formatAllocStrs (s : rest) i =
-      ((pretty "string[") <> (PP.viaShow i) <> (pretty "] =") PP.<+> (PP.viaShow s)) : formatAllocStrs rest (i + 1)
-
-    prettifyArg :: L.Arg -> PP.Doc T.Text
-    prettifyArg (L.Arg {argIdent=name, argType=ty}) = (pretty $ name <> ":") PP.<+> (PP.viaShow ty)
-
-    pretty :: T.Text -> PP.Doc ann
-    pretty = PP.pretty @T.Text
-
-    binaryToText :: L.BinaryOp -> T.Text
-    binaryToText L.Add = "+"
-    binaryToText L.Subtract = "-"
-    binaryToText L.Multiply = "*"
-    binaryToText L.Divide = "/"
-    binaryToText L.Greater = ">"
-    binaryToText L.GreaterEql = ">="
-    binaryToText L.Less = "<"
-    binaryToText L.LessEql = "<="
-    binaryToText L.Eql = "=="
-    binaryToText L.NotEql = "!="
-    binaryToText L.Concat = "++"
-
-    unaryToText :: L.UnaryOp -> T.Text
-    unaryToText L.Not = "not"
-    unaryToText L.Negate = "negate"
+      ((PP.pretty @T.Text "string[") <> (PP.viaShow i) <> (PP.pretty @T.Text "] =") PP.<+> (PP.viaShow s)) : formatAllocStrs rest (i + 1)

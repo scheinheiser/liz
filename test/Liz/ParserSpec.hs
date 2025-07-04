@@ -18,10 +18,10 @@ spec :: Spec
 spec = do
   describe "Literal parsing" $ do
     it "parse a string" $ do
-      parse P.parseStr "" "\"Hello World\"" `shouldParse` "\"Hello World\""
+      parse P.parseStr "" "\"Hello World\"" `shouldParse` "Hello World"
 
     it "parse a char" $ do
-      parse P.parseChar "" "'!'" `shouldParse` "'!'"
+      parse P.parseChar "" "'!'" `shouldParse` "!"
 
     -- it "parse an integer" $ do
     --   parse P.parseNum "" "42" `shouldParse` (L.SELiteral L.Int' "42")
@@ -44,14 +44,14 @@ spec = do
         parse P.parseSExpr "" "(var measurement String \"cm\")" `shouldParse` (L.SEVar base (mkPos 1, mkPos 29) L.Var{
           varIdent = "measurement",
           varType = L.String',
-          varValue = L.SELiteral L.String' "\"cm\"" (mkPos 1, mkPos 25) (mkPos 1, mkPos 29)
+          varValue = L.SELiteral L.String' "cm" (mkPos 1, mkPos 25) (mkPos 1, mkPos 29)
         })
 
       it "parse a char" $ do
         parse P.parseSExpr "" "(var n Char 'n')" `shouldParse` (L.SEVar base (mkPos 1, mkPos 16) L.Var{
           varIdent = "n",
           varType = L.Char',
-          varValue = L.SELiteral L.Char' "'n'" (mkPos 1, mkPos 13) (mkPos 1, mkPos 16)
+          varValue = L.SELiteral L.Char' "n" (mkPos 1, mkPos 13) (mkPos 1, mkPos 16)
         })
 
       it "parse an integer" $ do
@@ -94,7 +94,7 @@ spec = do
         parse P.parseSExpr "" "(var hello String \"World\")" `shouldParse` (L.SEVar base (mkPos 1, mkPos 26) L.Var{
           varIdent = "hello",
           varType = L.String',
-          varValue = L.SELiteral L.String' "\"World\"" (mkPos 1, mkPos 19) (mkPos 1, mkPos 26)
+          varValue = L.SELiteral L.String' "World" (mkPos 1, mkPos 19) (mkPos 1, mkPos 26)
         })
 
       it "parse a variable and infer its type" $ do
@@ -149,7 +149,7 @@ spec = do
           funcReturnType = L.String', 
           funcBody = [(L.SEConst (mkPos 2, mkPos 4) (mkPos 2, mkPos 41) L.Var{varIdent = "something", 
                         varType = L.String', 
-                        varValue = L.SELiteral L.String' "\"just did something!\"" (mkPos 2, mkPos 20) (mkPos 2, mkPos 41)})
+                        varValue = L.SELiteral L.String' "just did something!" (mkPos 2, mkPos 20) (mkPos 2, mkPos 41)})
                       ,(L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 19) (L.SEIdentifier "something" (mkPos 3, mkPos 10) (mkPos 3, mkPos 19)))
                       ,(L.SEReturn (mkPos 4, mkPos 4) (mkPos 4, mkPos 20)(L.SEIdentifier "something" (mkPos 4, mkPos 11) (mkPos 4, mkPos 20)))]
         })
@@ -203,7 +203,7 @@ spec = do
         parse P.parseSExpr "" block `shouldParse` (L.SEBlockStmt 
           (mkPos 1, mkPos 2) 
           (mkPos 4, mkPos 21) 
-          [(L.SEConst (mkPos 2, mkPos 4) (mkPos 2, mkPos 41) L.Var{varIdent = "something", varType = L.String', varValue = L.SELiteral L.String' "\"just did something!\"" (mkPos 2, mkPos 20) (mkPos 2, mkPos 41)})
+          [(L.SEConst (mkPos 2, mkPos 4) (mkPos 2, mkPos 41) L.Var{varIdent = "something", varType = L.String', varValue = L.SELiteral L.String' "just did something!" (mkPos 2, mkPos 20) (mkPos 2, mkPos 41)})
             ,(L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 19) (L.SEIdentifier "something" (mkPos 3, mkPos 10) (mkPos 3, mkPos 19)))
             ,(L.SEReturn (mkPos 4, mkPos 4) (mkPos 4, mkPos 20)(L.SEIdentifier "something" (mkPos 4, mkPos 11) (mkPos 4, mkPos 20)))])
 
@@ -217,7 +217,7 @@ spec = do
           (mkPos 1, mkPos 2)
           (mkPos 2, mkPos 33) 
           (L.SEBinary L.Greater (mkPos 1, mkPos 6) (mkPos 1, mkPos 12) (L.SELiteral L.Int' "10" (mkPos 1, mkPos 8) (mkPos 1, mkPos 10)) (L.SELiteral L.Int' "5" (mkPos 1, mkPos 11) (mkPos 1, mkPos 12)))
-          (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 32) (L.SELiteral L.String' "\"10 is greater than 5\"" (mkPos 2, mkPos 10) (mkPos 2, mkPos 32)))
+          (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 32) (L.SELiteral L.String' "10 is greater than 5" (mkPos 2, mkPos 10) (mkPos 2, mkPos 32)))
           Nothing)
       it "parse an if statement with an else branch" $ do
         let ifstmt = """
@@ -229,5 +229,5 @@ spec = do
           (mkPos 1, mkPos 2)
           (mkPos 3, mkPos 36) 
           (L.SEBinary L.Greater (mkPos 1, mkPos 6) (mkPos 1, mkPos 12) (L.SELiteral L.Int' "10" (mkPos 1, mkPos 8) (mkPos 1, mkPos 10)) (L.SELiteral L.Int' "5" (mkPos 1, mkPos 11) (mkPos 1, mkPos 12)))
-          (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 32) (L.SELiteral L.String' "\"10 is greater than 5\"" (mkPos 2, mkPos 10) (mkPos 2, mkPos 32)))
-          (Just ((L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 35) (L.SELiteral L.String' "\"10 isn't greater than 5\"" (mkPos 3, mkPos 10) (mkPos 3, mkPos 35))))))
+          (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 32) (L.SELiteral L.String' "10 is greater than 5" (mkPos 2, mkPos 10) (mkPos 2, mkPos 32)))
+          (Just ((L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 35) (L.SELiteral L.String' "10 isn't greater than 5" (mkPos 3, mkPos 10) (mkPos 3, mkPos 35))))))

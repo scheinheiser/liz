@@ -323,7 +323,7 @@ spec = do
               ]
          }),
          (L.SEFuncCall (mkPos 3, mkPos 2) (mkPos 3, mkPos 25) "concat" 
-          [(L.SELiteral L.String' "\"hello \"" (mkPos 3, mkPos 9) (mkPos 3, mkPos 17)), (L.SELiteral L.String' "\"world\"" (mkPos 3, mkPos 18) (mkPos 3, mkPos 25))])])
+          [(L.SELiteral L.String' "hello " (mkPos 3, mkPos 9) (mkPos 3, mkPos 17)), (L.SELiteral L.String' "world" (mkPos 3, mkPos 18) (mkPos 3, mkPos 25))])])
 
       it "Fail to check a function call with too many args" $ do
         let input = """
@@ -397,8 +397,8 @@ spec = do
           (analyseProgram output) `shouldBe` (Right $ L.Program [
             (L.SEIfStmt (mkPos 1, mkPos 2) (mkPos 2, mkPos 18)
               (L.SEBinary L.Eql (mkPos 1, mkPos 6) (mkPos 1, mkPos 24) 
-                (L.SELiteral L.String' "\"hello\"" (mkPos 1, mkPos 9) (mkPos 1, mkPos 16)) (L.SELiteral L.String' "\"hello\"" (mkPos 1, mkPos 17) (mkPos 1, mkPos 24)))
-              (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 17) (L.SELiteral L.String' "\"hello\"" (mkPos 2, mkPos 10) (mkPos 2, mkPos 17))) Nothing)])
+                (L.SELiteral L.String' "hello" (mkPos 1, mkPos 9) (mkPos 1, mkPos 16)) (L.SELiteral L.String' "hello" (mkPos 1, mkPos 17) (mkPos 1, mkPos 24)))
+              (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 17) (L.SELiteral L.String' "hello" (mkPos 2, mkPos 10) (mkPos 2, mkPos 17))) Nothing)])
         it "Check an if statement with an else" $ do
           let input = """
             (if (== "hello" "hello")
@@ -410,9 +410,9 @@ spec = do
           (analyseProgram output) `shouldBe` (Right $ L.Program [
             (L.SEIfStmt (mkPos 1, mkPos 2) (mkPos 3, mkPos 16)
             (L.SEBinary L.Eql (mkPos 1, mkPos 6) (mkPos 1, mkPos 24) 
-              (L.SELiteral L.String' "\"hello\"" (mkPos 1, mkPos 9) (mkPos 1, mkPos 16)) (L.SELiteral L.String' "\"hello\"" (mkPos 1, mkPos 17) (mkPos 1, mkPos 24)))
-            (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 17) (L.SELiteral L.String' "\"hello\"" (mkPos 2, mkPos 10) (mkPos 2, mkPos 17)))
-            (Just (L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 15) (L.SELiteral L.String' "\"bye\"" (mkPos 3, mkPos 10) (mkPos 3, mkPos 15)))))])
+              (L.SELiteral L.String' "hello" (mkPos 1, mkPos 9) (mkPos 1, mkPos 16)) (L.SELiteral L.String' "hello" (mkPos 1, mkPos 17) (mkPos 1, mkPos 24)))
+            (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 17) (L.SELiteral L.String' "hello" (mkPos 2, mkPos 10) (mkPos 2, mkPos 17)))
+            (Just (L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 15) (L.SELiteral L.String' "bye" (mkPos 3, mkPos 10) (mkPos 3, mkPos 15)))))])
         it "Fail checking an if statement with a branch type mismatch" $ do
           let input = """
             (if (not True)

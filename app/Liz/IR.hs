@@ -75,7 +75,7 @@ fromSExpr (L.SELiteral ty lit _ _) i ir@(IR{..})=
         L.Undef' -> (IRUndef, Nothing)
         L.String' ->
           let allocStrs = lit : irAllocatedStrings in
-          (IRString $ T.show irStringIdx, Just $ ir{irAllocatedStrings= reverse allocStrs, irStringIdx=irStringIdx + 1})
+          (IRString $ T.show irStringIdx, Just $ ir{irAllocatedStrings= allocStrs, irStringIdx=irStringIdx + 1})
   in
   case ir' of
     Nothing -> (v, i, ir)
@@ -217,10 +217,10 @@ patchJumps l = aux $ NE.toList l
 programToIR :: L.Program -> ([IROp], IR)
 programToIR (L.Program sexprs) = 
   let 
-    (conv, _, alloctracker) = translateBody sexprs 0 mkIR
+    (conv, _, IR{irAllocatedStrings=strs, irStringIdx=stridx}) = translateBody sexprs 0 mkIR
     (labelled, _) = applyLabels conv 0
     res = patchJumps $ NE.fromList labelled
-  in (res, alloctracker)
+  in (res, IR{irAllocatedStrings=reverse strs, irStringIdx = stridx})
 
 ppIR :: L.Program -> IO ()
 ppIR prog =

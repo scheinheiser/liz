@@ -13,9 +13,6 @@ import qualified Data.List.NonEmpty as NE
 import qualified Prettyprinter as PP
 import Prettyprinter.Render.Text (putDoc)
 
-getOutput :: Either a b -> b
-getOutput (Right x) = x
-
 -- helper functions
 pushExpr :: Label -> IROp -> Label
 pushExpr (Label (n, exprs)) instr = Label (n, instr : exprs)
@@ -152,7 +149,7 @@ applyLabels prog i = aux prog (Label ((labelSuffix i), [])) [] i
     aux (expr : rest) curr_lbl acc idx = aux rest (pushExpr curr_lbl expr) acc idx
 
 patchJumps :: NE.NonEmpty IROp -> [IROp]
-patchJumps l = aux $ NE.toList l
+patchJumps = aux . NE.toList
   where
     aux :: [IROp] -> [IROp]
     aux [] = []

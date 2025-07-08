@@ -6,8 +6,8 @@ module Liz.QBE.QBE where
 
 import qualified Data.Text as T
 import qualified Data.List.NonEmpty as NE
-import Prettyprinter
 
+import Prettyprinter
 import Data.Word
 
 data Sigil = AT -- aggregate types
@@ -39,10 +39,12 @@ instance Pretty Prim where
   pretty PrimSingle = pretty @T.Text "s"
   pretty PrimDouble = pretty @T.Text "d"
 
-data Ext = ExtByte
+data Ext = ExtBase Prim
+  | ExtByte
   | ExtHW
 
 instance Pretty Ext where
+  pretty (ExtBase t) = pretty t
   pretty ExtByte = pretty @T.Text "b"
   pretty ExtHW = pretty @T.Text "h"
 
@@ -53,8 +55,8 @@ data Const = CInt Bool Word64 -- flag for 2's complement
 
 instance Pretty Const where
   pretty (CInt f v) = if f then (pretty @T.Text "-") <> (pretty v) else pretty v
-  pretty (CSingle v) = pretty v
-  pretty (CFloat v) = pretty v
+  pretty (CSingle v) = (pretty @T.Text "s_") <> (pretty v)
+  pretty (CFloat v) = (pretty @T.Text "d_") <> (pretty v)
   pretty (CGlobal i) = pretty i
 
 data Value = VConst Const 
@@ -64,10 +66,42 @@ instance Pretty Value where
   pretty (VConst v) = pretty v
   pretty (VTemp i) = pretty i
 
-data VarAssgn = VarAssgn (Ident Temp) Prim
+data Assignment = Assignment (Ident Temp) Prim
 
-instance Pretty VarAssgn where
-  pretty (VarAssgn i t) = (pretty i) <+> (pretty @T.Text "=") <> (pretty t)
+data DataDef = DataDef (Ident Global) (Maybe Int) (NE.NonEmpty DataItem)
+data DataItem = DIExt Ext (NE.NonEmpty DataItem)
+  | DIString T.Text
+  | DIZero Int
+  | DIConst Const
+
+instance Pretty DataItem where
+  pretty (DIExt t items) = 
+    let unpacked_items = NE.toList items in
+    (pretty t) <+> (hsep $ map pretty unpacked_items)
+  pretty (DIZero am) = (pretty @T.Text "z") <+> (viaShow am)
+  pretty (DIConst c) = pretty c
+  pretty (DIString s) = (pretty @T.Text "b") <+> (viaShow s) <> comma <+> (pretty @T.Text "b 0")
+
+instance Pretty DataDef where
+  pretty (DataDef i Nothing items) =
+    let unpacked_items = NE.toList items in
+    (pretty @T.Text "data") <+> (pretty i) <+> (pretty @T.Text "=") <+> lbrace <+> (hsep . punctuate comma $ map pretty unpacked_items) <+> rbrace
+  pretty (DataDef i (Just alignment) items) =
+    let unpacked_items = NE.toList items in
+    (pretty @T.Text "data") <+> (pretty i) <+> (pretty @T.Text "=") <+> (pretty @T.Text "align") <+> (viaShow alignment) <+> lbrace <+> (hsep . punctuate comma $ map pretty unpacked_items) <+> rbrace
+
+data Linkage = Export
+  | Thread
+  | Section T.Text (Maybe [T.Text])
+
+instance Pretty Linkage where
+  pretty Export = pretty @T.Text "export"
+  pretty Thread = pretty @T.Text "thread"
+  pretty (Section name Nothing) = (pretty @T.Text "section") <+> (viaShow name)
+  pretty (Section name (Just flags)) = (pretty @T.Text "section") <+> (hsep $ map viaShow (name : flags))
+
+instance Pretty Assignment where
+  pretty (Assignment i t) = (pretty i) <+> (pretty @T.Text "=") <> (pretty t)
 
 data BinOp = Add
   | Sub 
@@ -185,9 +219,9 @@ instance Pretty JmpOp where
   pretty (Ret (Just v)) = (pretty @T.Text "ret") <+> (pretty v)
   pretty Hlt = pretty @T.Text "hlt"
 
-data MemOp = Alloc16 VarAssgn Value
-  | Alloc8 VarAssgn Value
-  | Alloc4 VarAssgn Value
+data MemOp = Alloc16 Assignment Value
+  | Alloc8 Assignment Value
+  | Alloc4 Assignment Value
   | Blit (Ident Temp) (Ident Temp) Const -- ???
   | StoreExt Ext Value (Ident Temp)
   | Store Prim Value (Ident Temp)
@@ -207,15 +241,15 @@ instance Pretty Sign where
   pretty Signed = pretty @T.Text "s"
   pretty Unsigned = pretty @T.Text "u"
 
-data Instr = Binary VarAssgn BinOp Value Value
-  | Unary VarAssgn UnOp Value
-  | Load VarAssgn Prim Value
-  | LoadW VarAssgn Sign Value
-  | LoadB VarAssgn Sign Value
-  | LoadH VarAssgn Sign Value
+data Instr = Binary Assignment BinOp Value Value
+  | Unary Assignment UnOp Value
+  | Load Assignment Ext Value
+  | LoadW Assignment Sign Value
+  | LoadB Assignment Sign Value
+  | LoadH Assignment Sign Value
   | Jump JmpOp
   | Memory MemOp
-  | Phi VarAssgn (NE.NonEmpty (Ident Label, Value))
+  | Phi Assignment (NE.NonEmpty (Ident Label, Value))
 
 instance Pretty Instr where
   pretty (Binary a op l r) = (pretty a) <+> (pretty op) <+> (pretty l) <+> (pretty r)
@@ -229,3 +263,9 @@ instance Pretty Instr where
   pretty (Phi a branches) =
     let unpacked_branches = NE.toList branches in
     (pretty a) <+> (pretty @T.Text "phi") <+> (hsep . punctuate comma $ map (\(l, v) -> (pretty l) <+> (pretty v)) unpacked_branches)
+
+data Block = Block (Ident Label) [Instr]
+instance Pretty Block where
+  pretty (Block n exprs) = (pretty n) <> line <> (indent 8 . vsep $ map pretty exprs)
+
+data FuncDef = FuncDef (Maybe Linkage) (Maybe Ext) [Param] (NE.NonEmpty Block)

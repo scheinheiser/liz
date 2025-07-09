@@ -39,14 +39,21 @@ instance Pretty Prim where
   pretty PrimSingle = pretty @T.Text "s"
   pretty PrimDouble = pretty @T.Text "d"
 
-data Ext = ExtBase Prim
+data Ext = ExtPrim Prim
   | ExtByte
   | ExtHW
 
 instance Pretty Ext where
-  pretty (ExtBase t) = pretty t
+  pretty (ExtPrim t) = pretty t
   pretty ExtByte = pretty @T.Text "b"
   pretty ExtHW = pretty @T.Text "h"
+
+data AbiTy = AbiPrim Prim
+  | AbiAT (Ident AT)
+
+instance Pretty AbiTy where
+  pretty (AbiPrim t) = pretty t
+  pretty (AbiAT i) = pretty i
 
 data Const = CInt Bool Word64 -- flag for 2's complement
   | CSingle Float
@@ -66,7 +73,7 @@ instance Pretty Value where
   pretty (VConst v) = pretty v
   pretty (VTemp i) = pretty i
 
-data Assignment = Assignment (Ident Temp) Prim
+data Assignment = Assignment (Ident Temp) AbiTy
 
 data DataDef = DataDef (Ident Global) (Maybe Int) (NE.NonEmpty DataItem)
 data DataItem = DIExt Ext (NE.NonEmpty DataItem)
@@ -250,9 +257,12 @@ data Instr = Binary Assignment BinOp Value Value
   | Jump JmpOp
   | Memory MemOp
   | Phi Assignment (NE.NonEmpty (Ident Label, Value))
+  | VAStart (Ident Temp)
+  | VAArg Assignment (Ident Temp)
+  | Call (Maybe Assignment) (Ident Global) [Param] -- possible assignment, function identifier and arguments
 
 instance Pretty Instr where
-  pretty (Binary a op l r) = (pretty a) <+> (pretty op) <+> (pretty l) <+> (pretty r)
+  pretty (Binary a op l r) = (pretty a) <+> (pretty op) <+> (pretty l) <> comma <+> (pretty r)
   pretty (Unary a op v) = (pretty a) <+> (pretty op) <+> (pretty v)
   pretty (Load a suffix v) = (pretty a) <+> (pretty @T.Text "load") <> (pretty suffix) <+> (pretty v)
   pretty (LoadW a sign v) = (pretty a) <+> (pretty @T.Text "load") <> (pretty sign) <> (pretty @T.Text "w") <+> (pretty v)
@@ -263,9 +273,48 @@ instance Pretty Instr where
   pretty (Phi a branches) =
     let unpacked_branches = NE.toList branches in
     (pretty a) <+> (pretty @T.Text "phi") <+> (hsep . punctuate comma $ map (\(l, v) -> (pretty l) <+> (pretty v)) unpacked_branches)
+  pretty (VAStart i) = (pretty @T.Text "vastart") <+> (pretty i)
+  pretty (VAArg a i) = (pretty a) <+> (pretty @T.Text "vaarg") <+> (pretty i)
+  pretty (Call Nothing funcIdent params) =
+    (pretty @T.Text "call") <+> (pretty funcIdent)
+      <> (parens . hsep . punctuate comma $ map pretty params)
+  pretty (Call (Just a) funcIdent params) =
+    (pretty a) <+> (pretty @T.Text "call") <+> (pretty funcIdent)
+      <> (parens . hsep . punctuate comma $ map pretty params)
 
 data Block = Block (Ident Label) [Instr]
 instance Pretty Block where
   pretty (Block n exprs) = (pretty n) <> line <> (indent 8 . vsep $ map pretty exprs)
 
-data FuncDef = FuncDef (Maybe Linkage) (Maybe Ext) [Param] (NE.NonEmpty Block)
+data Param = Regular (Ident Temp) AbiTy
+  | Env (Ident Temp)
+  | VarMark
+
+instance Pretty Param where
+  pretty (Regular i t) = (pretty t) <+> (pretty i)
+  pretty (Env i) = (pretty @T.Text "env") <+> (pretty i)
+  pretty VarMark = pretty @T.Text "..."
+
+data FuncDef = FuncDef (Maybe Linkage) (Maybe AbiTy) (Ident Global) [Param] (NE.NonEmpty Block)
+instance Pretty FuncDef where
+  pretty (FuncDef Nothing Nothing i params body) =
+    let unpacked_body = NE.toList body in
+    (pretty @T.Text "function") <+> (pretty i) 
+      <> (parens . hsep . punctuate comma $ map pretty params) 
+        <+> lbrace <> line <> (vsep $ map pretty unpacked_body) <> line <> rbrace
+  pretty (FuncDef (Just linkage) Nothing i params body) =
+    let unpacked_body = NE.toList body in
+    (pretty linkage) <+> (pretty @T.Text "function") 
+      <+> (pretty i) <> (parens . hsep . punctuate comma $ map pretty params) 
+          <+> lbrace <> line <> (vsep $ map pretty unpacked_body) <> line <> rbrace
+  pretty (FuncDef Nothing (Just retType) i params body) =
+    let unpacked_body = NE.toList body in
+    (pretty @T.Text "function") <+> (pretty retType) 
+      <+> (pretty i) <> (parens . hsep . punctuate comma $ map pretty params) 
+          <+> lbrace <> line <> (vsep $ map pretty unpacked_body) <> line <> rbrace
+  pretty (FuncDef (Just linkage) (Just retType) i params body) =
+    let unpacked_body = NE.toList body in
+    (pretty linkage) <+> (pretty @T.Text "function") 
+      <+> (pretty retType) <+> (pretty i) 
+        <> (parens . hsep . punctuate comma $ map pretty params) <+> lbrace 
+          <> line <> (vsep $ map pretty unpacked_body) <> line <> rbrace

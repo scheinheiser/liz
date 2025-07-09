@@ -340,14 +340,14 @@ data Block = Block (Ident Label) [Instr]
 instance Pretty Block where
   pretty (Block n exprs) = (pretty n) <> line <> (indent 8 . vsep $ map pretty exprs)
 
-data Param = Regular (Ident Temp) AbiTy
-  | Env (Ident Temp)
-  | VarMark
+data Param = RegularParam (Ident Temp) AbiTy
+  | EnvParam (Ident Temp)
+  | VariadicParam
 
 instance Pretty Param where
-  pretty (Regular i t) = (pretty t) <+> (pretty i)
-  pretty (Env i) = (pretty @T.Text "env") <+> (pretty i)
-  pretty VarMark = pretty @T.Text "..."
+  pretty (RegularParam i t) = (pretty t) <+> (pretty i)
+  pretty (EnvParam i) = (pretty @T.Text "env") <+> (pretty i)
+  pretty VariadicParam = pretty @T.Text "..."
 
 data FuncDef = FuncDef (Maybe Linkage) (Maybe AbiTy) (Ident Global) [Param] (NE.NonEmpty Block)
 instance Pretty FuncDef where
@@ -372,3 +372,19 @@ instance Pretty FuncDef where
       <+> (pretty retType) <+> (pretty i) 
         <> (parens . hsep . punctuate comma $ map pretty params) <+> lbrace 
           <> line <> (vsep $ map pretty unpacked_body) <> line <> rbrace
+
+data Program = Program
+  { progFuncs :: [FuncDef]
+  , progData  :: [DataDef]
+  , progTypes :: [TypeDef]
+  }
+
+instance Pretty Program where
+  pretty Program{..} =
+    (pretty @T.Text "# ========= DATA =========") <> line 
+      <> (vsep $ map pretty progData) <> line 
+        <> line <> (pretty @T.Text "# ========= TYPES =========") 
+          <> line <> (vsep $ map pretty progTypes) 
+            <> line <> line <>
+              (pretty @T.Text "# ========= FUNCTIONS =========") <> line
+                <> (vsep $ map pretty progFuncs) <> line

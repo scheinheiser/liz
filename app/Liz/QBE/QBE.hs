@@ -18,6 +18,15 @@ data Sigil = AT -- aggregate types
 newtype Ident (t :: Sigil) = Ident T.Text
   deriving (Show, Eq)
 
+type Alignment = Int
+
+data Sign = Signed
+  | Unsigned
+
+instance Pretty Sign where
+  pretty Signed = pretty @T.Text "s"
+  pretty Unsigned = pretty @T.Text "u"
+
 instance Pretty (Ident AT) where
   pretty (Ident i) = (pretty @T.Text ":") <> (pretty i)
 instance Pretty (Ident Global) where
@@ -49,10 +58,14 @@ instance Pretty Ext where
   pretty ExtHW = pretty @T.Text "h"
 
 data AbiTy = AbiPrim Prim
+  | AbiByte Sign
+  | AbiHW Sign
   | AbiAT (Ident AT)
 
 instance Pretty AbiTy where
   pretty (AbiPrim t) = pretty t
+  pretty (AbiByte s) = pretty s <> pretty @T.Text "b"
+  pretty (AbiHW s) = pretty s <> pretty @T.Text "h"
   pretty (AbiAT i) = pretty i
 
 data Const = CInt Bool Word64 -- flag for 2's complement
@@ -73,9 +86,8 @@ instance Pretty Value where
   pretty (VConst v) = pretty v
   pretty (VTemp i) = pretty i
 
-data Assignment = Assignment (Ident Temp) AbiTy
 
-data DataDef = DataDef (Ident Global) (Maybe Int) (NE.NonEmpty DataItem)
+data DataDef = DataDef (Ident Global) (Maybe Alignment) (NE.NonEmpty DataItem)
 data DataItem = DIExt Ext (NE.NonEmpty DataItem)
   | DIString T.Text
   | DIZero Int
@@ -97,6 +109,54 @@ instance Pretty DataDef where
     let unpacked_items = NE.toList items in
     (pretty @T.Text "data") <+> (pretty i) <+> (pretty @T.Text "=") <+> (pretty @T.Text "align") <+> (viaShow alignment) <+> lbrace <+> (hsep . punctuate comma $ map pretty unpacked_items) <+> rbrace
 
+data SubTy = SubExt Ext
+  | SubAT (Ident AT)
+
+instance Pretty SubTy where
+  pretty (SubExt t) = pretty t
+  pretty (SubAT i) = pretty i
+
+newtype TypeAssignment = TypeAssignment (Ident AT)
+instance Pretty TypeAssignment where
+  pretty (TypeAssignment i) = (pretty i) <+> (pretty @T.Text "=")
+
+data TypeDef = RegularType TypeAssignment (Maybe Alignment) (NE.NonEmpty (SubTy, Maybe Int))
+  | UnionType TypeAssignment (Maybe Alignment) (NE.NonEmpty (SubTy, Maybe Int))
+  | OpaqueType TypeAssignment Alignment Int
+
+ppType :: (SubTy, Maybe Int) -> Doc ann
+ppType (t, Nothing) = pretty t
+ppType (t, Just n) = pretty t <+> pretty n
+
+instance Pretty TypeDef where
+  pretty (RegularType i Nothing contents) =
+    let unpacked_contents = NE.toList contents in
+    (pretty @T.Text "type") <+> (pretty i) 
+      <+> lbrace <+> (hsep . punctuate comma $ map ppType unpacked_contents) 
+        <+> rbrace
+  pretty (RegularType i (Just alignment) contents) =
+    let unpacked_contents = NE.toList contents in
+    (pretty @T.Text "type") <+> (pretty i) 
+      <+> (pretty @T.Text "align") <+> (pretty alignment)
+        <+> lbrace <+> (hsep . punctuate comma $ map ppType unpacked_contents) 
+          <+> rbrace
+  pretty (UnionType i Nothing contents) =
+    let unpacked_contents = NE.toList contents in
+    (pretty @T.Text "type") <+> (pretty i) 
+      <+> lbrace <+> (hsep $ map (\t -> lbrace <+> (ppType t) <+> rbrace) unpacked_contents) 
+        <+> rbrace
+  pretty (UnionType i (Just alignment) contents) =
+    let unpacked_contents = NE.toList contents in
+    (pretty @T.Text "type") <+> (pretty i) 
+      <+> (pretty @T.Text "align") <+> (pretty alignment)
+        <+> lbrace <+> (hsep $ map (\t -> lbrace <+> (ppType t) <+> rbrace) unpacked_contents) 
+          <+> rbrace
+  pretty (OpaqueType i alignment n) =
+    (pretty @T.Text "type") <+> (pretty i) 
+      <+> (pretty @T.Text "align") <+> (pretty alignment) 
+        <+> lbrace <+> (pretty n) 
+          <+> rbrace
+
 data Linkage = Export
   | Thread
   | Section T.Text (Maybe [T.Text])
@@ -107,6 +167,7 @@ instance Pretty Linkage where
   pretty (Section name Nothing) = (pretty @T.Text "section") <+> (viaShow name)
   pretty (Section name (Just flags)) = (pretty @T.Text "section") <+> (hsep $ map viaShow (name : flags))
 
+data Assignment = Assignment (Ident Temp) AbiTy
 instance Pretty Assignment where
   pretty (Assignment i t) = (pretty i) <+> (pretty @T.Text "=") <> (pretty t)
 
@@ -240,13 +301,6 @@ instance Pretty MemOp where
   pretty (Blit s d b) = (pretty @T.Text "blit") <+> (pretty s) <+> (pretty d) <+> (pretty b)
   pretty (StoreExt t v i) = (pretty @T.Text "store") <> (pretty t) <+> (pretty v) <> comma <+> (pretty i)
   pretty (Store t v i) = (pretty @T.Text "store") <> (pretty t) <+> (pretty v) <> comma <+> (pretty i)
-
-data Sign = Signed
-  | Unsigned
-
-instance Pretty Sign where
-  pretty Signed = pretty @T.Text "s"
-  pretty Unsigned = pretty @T.Text "u"
 
 data Instr = Binary Assignment BinOp Value Value
   | Unary Assignment UnOp Value

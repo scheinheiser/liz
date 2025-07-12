@@ -2,7 +2,13 @@
 
 module Liz.Codegen where
 
-import qualified Liz.Common.Types as T
-import qualified Liz.Common.Errors as E
+import Liz.IR.IRTypes
+import Liz.QBE.QBE
 
---  TODO: make qbe pretty printing...
+{- 
+  IDEA:
+  from each translated function/label, make a program
+  use (<>) to mash each thing together
+  build it up from the ground, return the full prog -}
+
+

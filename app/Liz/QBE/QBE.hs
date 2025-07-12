@@ -5,9 +5,11 @@
 module Liz.QBE.QBE where
 
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO (writeFile)
 import qualified Data.List.NonEmpty as NE
 
 import Prettyprinter
+import Prettyprinter.Render.Text (renderStrict)
 import Data.Word
 
 data Sigil = AT -- aggregate types
@@ -381,10 +383,19 @@ data Program = Program
 
 instance Pretty Program where
   pretty Program{..} =
-    (pretty @T.Text "# ========= DATA =========") <> line 
-      <> (vsep $ map pretty progData) <> line 
-        <> line <> (pretty @T.Text "# ========= TYPES =========") 
-          <> line <> (vsep $ map pretty progTypes) 
+    (pretty @T.Text "# ========= TYPES =========") <> line 
+      <> (vsep $ map pretty progTypes) <> line 
+        <> line <> (pretty @T.Text "# ========= DATA =========") 
+          <> line <> (vsep $ map pretty progData) 
             <> line <> line <>
               (pretty @T.Text "# ========= FUNCTIONS =========") <> line
                 <> (vsep $ map pretty progFuncs) <> line
+
+instance Semigroup Program where 
+  (<>) Program{progFuncs=pf1, progData=pd1, progTypes=pt1} Program{progFuncs=pf2, progData=pd2, progTypes=pt2} =
+    Program {progFuncs = pf1 <> pf2, progData = pd1 <> pd2, progTypes = pt1 <> pt2}
+
+writeProgToFile :: Program -> FilePath -> IO ()
+writeProgToFile prog fp =
+  let ppProg = renderStrict . layoutPretty defaultLayoutOptions $ pretty prog in
+  TIO.writeFile fp ppProg

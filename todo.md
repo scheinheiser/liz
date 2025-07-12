@@ -18,14 +18,14 @@
 - [ ] Allow declarations in any order.
 
 ## IR
-- [ ] Decide on block-style or label-style IR.
+- [x] Decide on block-style or label-style IR.
 - [x] Translate simple `SExpr` constructs to IR (arithmetic, assignment, etc).
-- [ ] Translate complex `SExpr` constructs to IR (functions, etc).
+- [x] Translate complex `SExpr` constructs to IR (functions, etc).
 - [ ] Implement constant propagation/folding.
 
 ## Codegen
 - [x] Decide between using LLVM or asm for IL. (using QBE instead)
-- [ ] Make a QBE pretty printing library.
+- [x] Make a QBE pretty printing library.
 - [ ] Compile simple expressions (i.e. arithmetic, boolean stuff).
 - [ ] Compile complex expressions (i.e. nested stuff, functions).
 - [ ] Compile and run the first working liz executable!

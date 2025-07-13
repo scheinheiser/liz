@@ -17,42 +17,42 @@ import Prettyprinter.Render.Text (putDoc)
 pushExpr :: Label -> IROp -> Label
 pushExpr (Label (n, exprs)) instr = Label (n, instr : exprs)
 
-translateBody :: [L.SExpr] -> Int -> IR -> ([IROp], Int, IR)
-translateBody l idx ir = let (res, i, ir'@IR{irAllocatedStrings=strs}) = aux l idx [] ir in (res, i, ir'{irAllocatedStrings = strs})
+translateBody :: [L.SExpr] -> Int -> AllocTracker -> ([IROp], Int, AllocTracker)
+translateBody l idx at = let (res, i, at'@AllocTracker{atAllocatedStrings=strs}) = aux l idx [] at in (res, i, at'{atAllocatedStrings = strs})
   where
-    aux :: [L.SExpr] -> Int -> [IROp] -> IR -> ([IROp], Int, IR)
-    aux [] i acc irAux = (acc, i, irAux)
-    aux (x : xs) i acc irAux = let (op, ni, irAux') = fromSExpr x i irAux in aux xs ni (op : acc) irAux'
+    aux :: [L.SExpr] -> Int -> [IROp] -> AllocTracker -> ([IROp], Int, AllocTracker)
+    aux [] i acc atAux = (acc, i, atAux)
+    aux (x : xs) i acc atAux = let (op, i', atAux') = fromSExpr x i atAux in aux xs i' (op : acc) atAux'
 
 tempVarIdent :: Int -> T.Text
 tempVarIdent i = T.pack $ "t" <> (show i)
 
-mkIR :: IR
-mkIR = IR{irAllocatedStrings=[], irStringIdx=0}
+mkTracker :: AllocTracker
+mkTracker = AllocTracker{atAllocatedStrings=[], atStringIdx=0}
 
 -- main ir functions
-fromSExpr :: L.SExpr -> Int -> IR -> (IROp, Int, IR)
-fromSExpr (L.SELiteral ty lit _ _) i ir@(IR{..})=
+fromSExpr :: L.SExpr -> Int -> AllocTracker -> (IROp, Int, AllocTracker)
+fromSExpr (L.SELiteral ty lit _ _) i at@(AllocTracker{..})=
   let 
-    (v, ir') = 
+    (v, at') = 
       case ty of
-        L.Int' -> (IRInt $ read @Int (T.unpack lit), Nothing)
-        L.Float' -> (IRFloat $ read @Double (T.unpack lit), Nothing)
-        L.Bool' -> (IRBool $ read @Bool (T.unpack lit), Nothing)
-        L.Char' -> (IRChar $ read @Char (T.unpack lit), Nothing)
-        L.Unit' -> (IRUnit, Nothing)
-        L.Undef' -> (IRUndef, Nothing)
+        L.Int' -> (IRValue $ Integ $ read @Int (T.unpack lit), Nothing)
+        L.Float' -> (IRValue $ Flt $ read @Double (T.unpack lit), Nothing)
+        L.Bool' -> (IRValue $ Bln $ read @Bool (T.unpack lit), Nothing)
+        L.Char' -> (IRValue $ Chr $ read @Char (T.unpack lit), Nothing)
+        L.Unit' -> (IRValue Unt, Nothing)
+        L.Undef' -> (IRValue Undf, Nothing)
         L.String' ->
-          let allocStrs = lit : irAllocatedStrings in
-          (IRString $ T.show irStringIdx, Just $ ir{irAllocatedStrings= allocStrs, irStringIdx=irStringIdx + 1})
+          let allocStrs = lit : atAllocatedStrings in
+          (IRValue $ Str $ T.show atStringIdx, Just $ at{atAllocatedStrings= allocStrs, atStringIdx=atStringIdx + 1})
   in
-  case ir' of
-    Nothing -> (v, i, ir)
+  case at' of
+    Nothing -> (v, i, at)
     Just x -> (v, i, x)
-fromSExpr (L.SEBinary op _ _ l r) i ir =
+fromSExpr (L.SEBinary op _ _ l r) i at =
   let
-    (el, ni, ir') = fromSExpr l i ir
-    (er, fi, ir'') = fromSExpr r ni ir'
+    (el, i', at') = fromSExpr l i at
+    (er, i'', at'') = fromSExpr r i' at'
     irOp = 
       case op of
         L.Add -> IRBin L.Add
@@ -66,52 +66,52 @@ fromSExpr (L.SEBinary op _ _ l r) i ir =
         L.NotEql -> IRBin L.NotEql
         L.Greater -> IRBin L.Greater
         L.Less -> IRBin L.Less
-  in (IRVar (tempVarIdent $ fi + 1) (irOp el er), fi + 1, ir'')
-  -- (irOp el er, fi, ir'')
-fromSExpr (L.SEUnary op _ _ v) i ir =
+  in (IRVar (tempVarIdent $ i'' + 1) (irOp el er), i'' + 1, at'')
+fromSExpr (L.SEUnary op _ _ v) i at =
   let
-    (ev, ni, ir') = fromSExpr v i ir
+    (ev, i', at') = fromSExpr v i at
     irOp = 
       case op of
         L.Not -> IRUn L.Not
         L.Negate -> IRUn L.Negate
-  in (IRVar (tempVarIdent $ ni + 1) (irOp ev), ni + 1, ir')
-fromSExpr (L.SEVar _ _ L.Var{varIdent=ident, varValue=val}) i ir = 
-  let (evaluated_value, ni, ir') = fromSExpr val i ir in ((IRVar ident evaluated_value), ni, ir')
-fromSExpr (L.SEConst _ _ L.Var{varIdent=ident, varValue=val}) i ir = 
-  let (evaluated_value, ni, ir') = fromSExpr val i ir in ((IRConst ident evaluated_value), ni, ir')
-fromSExpr (L.SEFunc L.Func{funcIdent=ident, funcArgs=args, funcReturnType=ret, funcBody=body}) i ir =
-  let (tbody, ni, ir') = translateBody body i ir in (IRFunc ident args tbody ret, ni, ir')
-fromSExpr (L.SESet _ _ ident val) i ir = 
-  let (evaluated_value, ni, ir') = fromSExpr val i ir in ((IRVar ident evaluated_value), ni, ir')
-fromSExpr (L.SEIdentifier ident _ _) i ir = (IRIdent ident, i, ir)
-fromSExpr (L.SEReturn _ _ v) i ir = 
-  let (ev, ni, ir') = fromSExpr v i ir in (IRRet ev, ni, ir')
-fromSExpr (L.SEPrint _ _ v) i ir = 
-  let (ev, ni, ir') = fromSExpr v i ir in (IRPrint ev, ni, ir')
-fromSExpr (L.SEIfStmt _ _ cond tbranch Nothing) i ir =
+  in (IRVar (tempVarIdent $ i' + 1) (irOp ev), i' + 1, at')
+fromSExpr (L.SEVar _ _ L.Var{varIdent=ident, varValue=val}) i at = 
+  let (evaluated_value, i', at') = fromSExpr val i at in ((IRVar ident evaluated_value), i', at')
+fromSExpr (L.SEConst _ _ L.Var{varIdent=ident, varValue=val}) i at = 
+  let (evaluated_value, i', at') = fromSExpr val i at in ((IRConst ident evaluated_value), i', at')
+fromSExpr (L.SEFunc L.Func{funcIdent=ident, funcArgs=args, funcReturnType=ret, funcBody=body}) i at =
+  let (tbody, i', at') = translateBody body i at in (IRFunc $ Fn ident args tbody ret, i', at')
+fromSExpr (L.SESet _ _ ident val) i at = 
+  let (evaluated_value, i', at') = fromSExpr val i at in ((IRVar ident evaluated_value), i', at')
+fromSExpr (L.SEIdentifier ident _ _) i at = (IRIdent ident, i, at)
+fromSExpr (L.SEReturn _ _ v) i at = 
+  let (ev, i', at') = fromSExpr v i at in (IRRet ev, i', at')
+fromSExpr (L.SEPrint _ _ v) i at = 
+  let (ev, i', at') = fromSExpr v i at in (IRPrint ev, i', at')
+fromSExpr (L.SEIfStmt _ _ cond tbranch Nothing) i at =
   let 
-    (econd, ni, ir') = fromSExpr cond i ir
-    (etbr, fi, ir'') = fromSExpr tbranch ni ir'
+    (econd, i', at') = fromSExpr cond i at
+    (etbr, i'', at'') = fromSExpr tbranch i' at'
     -- no index, as it's assigned in label application to prevent clashing
     label = "L" 
     gotomain = "blank" -- blank goto because labels haven't been applied to the rest.
-  in (IRIf econd gotomain (label, Label (label, [etbr])) Nothing, fi + 1, ir'')
-fromSExpr (L.SEIfStmt _ _ cond tbranch (Just fbranch)) i ir =
+  in (IRIf $ IfSt econd gotomain (label, Label (label, [etbr])) Nothing, i'' + 1, at'')
+fromSExpr (L.SEIfStmt _ _ cond tbranch (Just fbranch)) i at =
   let 
-    (econd, ni, ir') = fromSExpr cond i ir
-    (etbr, ti, ir'') = fromSExpr tbranch ni ir'
-    (efbr, fi, ir''') = fromSExpr fbranch ti ir''
+    (econd, i', at') = fromSExpr cond i at
+    (etbr, ti, at'') = fromSExpr tbranch i' at'
+    (efbr, i'', at''') = fromSExpr fbranch ti at''
     label = "L"
     gotomain = "blank"
-  in (IRIf econd gotomain (label, Label (label, [etbr])) (Just (label, Label (label, [efbr]))), fi + 1, ir''')
-fromSExpr (L.SEFuncCall _ _ ident vals) i ir =
-  let (eargs, ni, ir') = translateBody vals i ir in
-  (IRFuncCall ident eargs, ni, ir')
-fromSExpr (L.SEBlockStmt _ _ vals) i ir =
-  let (ebody, ni, ir') = translateBody vals i ir in
-  (IRBlockStmt $ reverse ebody, ni, ir')
+  in (IRIf $ IfSt econd gotomain (label, Label (label, [etbr])) (Just (label, Label (label, [efbr]))), i'' + 1, at''')
+fromSExpr (L.SEFuncCall _ _ ident vals) i at =
+  let (eargs, i', at') = translateBody vals i at in
+  (IRFuncCall ident eargs, i', at')
+fromSExpr (L.SEBlockStmt _ _ vals) i at =
+  let (ebody, i', at') = translateBody vals i at in
+  (IRBlockStmt $ reverse ebody, i', at')
 
+-- FIX: detect if there's nested if statements
 applyLabels :: [IROp] -> Int -> ([IROp], Int)
 applyLabels prog i = aux prog (Label ((labelSuffix i), [])) [] i
   where
@@ -122,24 +122,24 @@ applyLabels prog i = aux prog (Label ((labelSuffix i), [])) [] i
     aux [] (Label (n, exprs)) acc idx = 
       if length exprs == 0 then (acc, idx)
                            else ((IRLabel $ Label (n, reverse exprs)) : acc, idx)
-    aux ((IRFunc ident args fexprs ret) : rest) old_lbl@(Label (_, exprs)) acc idx =
+    aux ((IRFunc (Fn ident args fexprs ret)) : rest) old_lbl@(Label (_, exprs)) acc idx =
       let 
         (led_body, next_idx) = applyLabels fexprs idx
-        led_func = IRFunc ident args led_body ret 
+        led_func = IRFunc $ Fn ident args led_body ret 
       in if length exprs == 0 then aux rest (Label (labelSuffix $ next_idx + 1, [])) (led_func : acc) (next_idx + 1)
          else aux rest (Label (labelSuffix $ next_idx + 1, [])) (led_func : (IRLabel old_lbl) : acc) (next_idx + 1)
 
-    aux (IRIf cond gotomain (gototrue, (Label (_, exprs))) Nothing : rest) old_lbl@(Label (_, label_exprs)) acc idx = 
+    aux (IRIf (IfSt cond gotomain (gototrue, (Label (_, exprs))) Nothing) : rest) old_lbl@(Label (_, label_exprs)) acc idx = 
       let
         labelled_true = gototrue <> (T.show $ idx + 1)
-        labelled_if = IRIf cond gotomain (labelled_true, (Label (labelled_true, exprs))) Nothing
+        labelled_if = IRIf $ IfSt cond gotomain (labelled_true, (Label (labelled_true, exprs))) Nothing
       in if length label_exprs == 0 then aux rest (Label (labelSuffix $ idx + 2, [])) (labelled_if : acc) (idx + 2)
          else aux rest (Label (labelSuffix $ idx + 2, [])) (labelled_if : (IRLabel old_lbl) : acc) (idx + 2)
-    aux (IRIf cond gotomain (gototrue, (Label (_, texprs))) (Just (gotofalse, Label (_, fexprs))) : rest) old_lbl@(Label (_, label_exprs)) acc idx = 
+    aux (IRIf (IfSt cond gotomain (gototrue, (Label (_, texprs))) (Just (gotofalse, Label (_, fexprs)))) : rest) old_lbl@(Label (_, label_exprs)) acc idx = 
       let
         labelled_true = gototrue <> (T.show $ idx + 1)
         labelled_false = gotofalse <> (T.show $ idx + 2)
-        labelled_if = IRIf cond gotomain (labelled_true, (Label (labelled_true, texprs))) (Just (labelled_false, Label (labelled_false, fexprs)))
+        labelled_if = IRIf $ IfSt cond gotomain (labelled_true, (Label (labelled_true, texprs))) (Just (labelled_false, Label (labelled_false, fexprs)))
       in if length label_exprs == 0 then aux rest (Label (labelSuffix $ idx + 3, [])) (labelled_if : acc) (idx + 3)
          else aux rest (Label (labelSuffix $ idx + 3, [])) (labelled_if : (IRLabel old_lbl) : acc) (idx + 3)
 
@@ -148,41 +148,42 @@ applyLabels prog i = aux prog (Label ((labelSuffix i), [])) [] i
                            else aux rest (Label (labelSuffix $ idx + 1, [])) (goto : (IRLabel old_lbl) : acc) (idx + 1)
     aux (expr : rest) curr_lbl acc idx = aux rest (pushExpr curr_lbl expr) acc idx
 
+-- FIX: detect if there's nested if statements
 patchJumps :: NE.NonEmpty IROp -> [IROp]
 patchJumps = aux . NE.toList
   where
     aux :: [IROp] -> [IROp]
     aux [] = []
-    aux [(IRIf cond _ (gototrue, Label (_, exprs)) Nothing)] =
+    aux [(IRIf (IfSt cond _ (gototrue, Label (_, exprs)) Nothing))] =
       let 
         lastE = getLast $ last exprs
         endlbl = IRLabel $ Label ("end", [IRPhi "res" [(gototrue, lastE)]])
         patched_exprs = exprs <> [IRGoto "end"] 
       in
-      IRIf cond "end" (gototrue, Label (gototrue, patched_exprs)) Nothing : endlbl : []
-    aux [(IRIf cond _ (gototrue, Label (_, texprs)) (Just (gotofalse, Label (_, fexprs))))] =
+      IRIf (IfSt cond "end" (gototrue, Label (gototrue, patched_exprs)) Nothing) : endlbl : []
+    aux [(IRIf (IfSt cond _ (gototrue, Label (_, texprs)) (Just (gotofalse, Label (_, fexprs)))))] =
       let 
         (lastT, lastF) = (getLast $ last texprs, getLast $ last fexprs)
         endlbl = IRLabel $ Label ("end", [(IRPhi "res" [(gototrue, lastT), (gotofalse, lastF)]), (IRRet $ IRIdent "res")])
         patched_texprs = texprs <> [IRGoto "end"] 
         patched_fexprs = fexprs <> [IRGoto "end"] 
       in
-      IRIf cond "end" (gototrue, Label (gototrue, patched_texprs)) (Just (gotofalse, Label (gotofalse, patched_fexprs))) : endlbl : []
-    aux ((IRIf cond _ (gototrue, Label (_, exprs)) Nothing) : next@(IRLabel (Label (n, _))) : rest) =
+      IRIf (IfSt cond "end" (gototrue, Label (gototrue, patched_texprs)) (Just (gotofalse, Label (gotofalse, patched_fexprs)))) : endlbl : []
+    aux ((IRIf (IfSt cond _ (gototrue, Label (_, exprs)) Nothing)) : next@(IRLabel (Label (n, _))) : rest) =
       let patched_exprs = exprs <> [IRGoto n] in
-      IRIf cond n (gototrue, Label (gototrue, patched_exprs)) Nothing : next : (aux rest)
-    aux ((IRIf cond _ (gototrue, Label (_, texprs)) (Just (gotofalse, Label (_, fexprs)))) : next@(IRLabel (Label (n, _))) : rest) =
+      IRIf (IfSt cond n (gototrue, Label (gototrue, patched_exprs)) Nothing) : next : (aux rest)
+    aux ((IRIf (IfSt cond _ (gototrue, Label (_, texprs)) (Just (gotofalse, Label (_, fexprs))))) : next@(IRLabel (Label (n, _))) : rest) =
       let 
         patched_texprs = texprs <> [IRGoto n] 
         patched_fexprs = fexprs <> [IRGoto n] 
       in
-      IRIf cond n (gototrue, Label (gototrue, patched_texprs)) (Just (gotofalse, Label (gotofalse, patched_fexprs))) : next : (aux rest) 
+      IRIf (IfSt cond n (gototrue, Label (gototrue, patched_texprs)) (Just (gotofalse, Label (gotofalse, patched_fexprs)))) : next : (aux rest) 
     aux (IRLabel (Label (n, exprs)) : rest) = 
       let patched_body = reverse $ aux exprs in IRLabel (Label (n, patched_body)) : aux rest
     aux (IRBlockStmt exprs : rest) = 
       let patched_body = aux exprs in IRBlockStmt patched_body : aux rest
-    aux (IRFunc n args exprs ret : rest) = 
-      let patched_body = aux exprs in IRFunc n args patched_body ret : aux rest
+    aux (IRFunc (Fn n args exprs ret) : rest) = 
+      let patched_body = aux exprs in (IRFunc $ Fn n args patched_body ret) : aux rest
     aux (expr : rest) = expr : aux rest
 
     getLast :: IROp -> IROp
@@ -192,19 +193,19 @@ patchJumps = aux . NE.toList
     getLast (IRVar i _) = IRIdent i
     getLast (IRConst i _) = IRIdent i
     getLast (IRRet v) = v
-    getLast (IRPrint _) = IRUnit
-    getLast (IRIf _ _ (_, Label (_, b)) Nothing) = getLast $ last b
+    getLast (IRPrint _) = IRValue Unt
+    getLast (IRIf (IfSt _ _ (_, Label (_, b)) Nothing)) = getLast $ last b
     -- TODO: do something for this case:
     -- getLast (IRIF _ _ (_, Label (_, bt)) (Just (_, Label (_, bf)))) = [getLast bt, getLast bf]
     getLast v = error $ "\nMalformed IR -\n  " <> (show v)
 
-programToIR :: L.Program -> ([IROp], IR)
+programToIR :: L.Program -> ([IROp], AllocTracker)
 programToIR (L.Program sexprs) = 
   let 
-    (conv, _, IR{irAllocatedStrings=strs, irStringIdx=stridx}) = translateBody sexprs 0 mkIR
+    (conv, _, at@AllocTracker{atAllocatedStrings=strs}) = translateBody sexprs 0 mkTracker
     (labelled, _) = applyLabels conv 0
     res = patchJumps $ NE.fromList labelled
-  in (res, IR{irAllocatedStrings=reverse strs, irStringIdx = stridx})
+  in (res, at{atAllocatedStrings= reverse strs})
 
 ppIR :: L.Program -> IO ()
 ppIR prog =
@@ -214,8 +215,8 @@ ppIR prog =
     border :: PP.Doc T.Text
     border = (PP.pretty @T.Text $ T.pack $ replicate 30 '-') <> PP.line
 
-    formatTracker :: IR -> PP.Doc T.Text
-    formatTracker IR{irAllocatedStrings=strs} =
+    formatTracker :: AllocTracker -> PP.Doc T.Text
+    formatTracker AllocTracker{atAllocatedStrings=strs} =
       let 
         contents =
           if length strs == 0 then [(PP.pretty @T.Text "<empty>")]

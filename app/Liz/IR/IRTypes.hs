@@ -1,25 +1,68 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Liz.IR.IRTypes (IR (..), IROp (..), Label (..), Goto) where
+module Liz.IR.IRTypes (AllocTracker (..), IROp (..), Fn (..), IfSt (..), Val (..), Label (..), Goto) where
 
 import qualified Liz.Common.Types as L
 import Prettyprinter
 import qualified Data.Text as T
 
--- TODO: change IR data structures to have nested types.
-
-data IR = IR 
-  { irAllocatedStrings :: [T.Text]
-  , irStringIdx :: Int
+data AllocTracker = AllocTracker
+  { atAllocatedStrings :: [T.Text]
+  , atStringIdx :: Int
   } deriving Show
 
-data IROp = IRInt Int
-  | IRBool Bool 
-  | IRFloat Double
-  | IRString T.Text
-  | IRChar Char 
-  | IRUnit
-  | IRUndef
+type Goto = T.Text
+newtype Label = Label (T.Text, [IROp]) -- name, expressions
+  deriving Show
+
+instance Pretty Label where
+  pretty (Label (name, exprs)) =
+    (pretty @T.Text $ name <> ":") 
+      <> line <> (indent 2 . vcat $ map pretty exprs) 
+        <> line
+
+data Val = Integ Int
+  | Bln Bool
+  | Flt Double
+  | Str T.Text
+  | Chr Char
+  | Unt 
+  | Undf
+  deriving Show
+
+instance Pretty Val where
+  pretty (Integ i) = viaShow i
+  pretty (Flt i) = viaShow i
+  pretty (Bln i) = viaShow i
+  pretty (Str i) = viaShow i
+  pretty (Chr i) = viaShow i
+  pretty Unt = pretty @T.Text "()"
+  pretty Undf = pretty @T.Text "undefined"
+
+data Fn = Fn T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
+  deriving Show
+instance Pretty Fn where
+  pretty (Fn i args body retTy) =
+    (pretty @T.Text i) <> (encloseSep lparen rparen (comma <> space) $ map prettifyArg args) 
+      <+> (pretty @T.Text "->") <+> (viaShow retTy) 
+        <> (pretty @T.Text ":") <> line 
+          <> (indent 2 . vcat $ map pretty body)
+
+data IfSt = IfSt IROp Goto (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
+  deriving Show
+instance Pretty IfSt where
+  pretty (IfSt cond gotomain truebranch falsebranch) = formatIfStmt cond gotomain truebranch falsebranch
+
+type IRBlock = [IROp]
+
+data IROp = -- IRInt Int
+  -- | IRBool Bool 
+  -- | IRFloat Double
+  -- | IRString T.Text
+  -- | IRChar Char 
+  -- | IRUnit
+  -- | IRUndef
+  IRValue Val
   | IRIdent T.Text
   | IRBin L.BinaryOp IROp IROp
   | IRUn L.UnaryOp IROp
@@ -27,27 +70,24 @@ data IROp = IRInt Int
   | IRPrint IROp
   | IRVar T.Text IROp
   | IRConst T.Text IROp
-  | IRFunc T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
+  | IRFunc Fn
   | IRFuncCall T.Text [IROp]
-  | IRBlockStmt [IROp]
+  | IRBlockStmt IRBlock
   | IRPhi T.Text [(T.Text, IROp)] -- identifier - possible label names + their result
-  | IRIf IROp Goto (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
+  | IRIf IfSt
   | IRLabel Label -- a wrapper around the label for the leader algorithm
   | IRGoto Goto -- a wrapper around goto for control flow/leader algorithm
   deriving Show
 
-type Goto = T.Text
-newtype Label = Label (T.Text, [IROp]) -- name, expressions
-  deriving Show
-
 instance Pretty IROp where
-  pretty (IRInt v) = viaShow v
-  pretty (IRFloat v) = viaShow v
-  pretty (IRBool v) = viaShow v
-  pretty (IRString v) = (pretty @T.Text "string[") <> (pretty v) <> (pretty @T.Text "]")
-  pretty (IRChar v) = viaShow v
-  pretty (IRUndef) = pretty @T.Text "undefined"
-  pretty (IRUnit) = pretty @T.Text "()"
+  -- pretty (IRInt v) = viaShow v
+  -- pretty (IRFloat v) = viaShow v
+  -- pretty (IRBool v) = viaShow v
+  -- pretty (IRString v) = (pretty @T.Text "string[") <> (pretty v) <> (pretty @T.Text "]")
+  -- pretty (IRChar v) = viaShow v
+  -- pretty (IRUndef) = pretty @T.Text "undefined"
+  -- pretty (IRUnit) = pretty @T.Text "()"
+  pretty (IRValue v) = pretty v
   pretty (IRIdent i) = pretty @T.Text i
   pretty (IRBin op l r) = formatBinary op l r
   pretty (IRUn op v) = formatUnary op v
@@ -60,16 +100,9 @@ instance Pretty IROp where
         <+> (pretty @T.Text "phi") 
           <+> (hsep . punctuate comma $ map (\(b, r) -> (pretty b) <+> (pretty r)) branches)
   pretty (IRConst i v) = formatVar "const" i v
-  pretty (IRFunc i args body retTy) =
-    (pretty @T.Text i) <> (encloseSep lparen rparen (comma <> space) $ map prettifyArg args) 
-      <+> (pretty @T.Text "->") <+> (viaShow retTy) 
-        <> (pretty @T.Text ":") <> line 
-          <> (indent 2 . vcat $ map pretty body)
-  pretty (IRIf cond gotomain truebranch falsebranch) = formatIfStmt cond gotomain truebranch falsebranch
-  pretty (IRLabel (Label (name, exprs))) =
-    (pretty @T.Text $ name <> ":") 
-      <> line <> (indent 2 . vcat $ map pretty exprs) 
-        <> line
+  pretty (IRFunc fn) = pretty fn
+  pretty (IRIf ifstmt) = pretty ifstmt
+  pretty (IRLabel lbl) = pretty lbl
   pretty (IRGoto name) = (pretty @T.Text "goto") <+> (pretty name)
   pretty (IRFuncCall i exprs) = 
     (pretty @T.Text i) 

@@ -6,6 +6,7 @@ module Liz.Common.Types where
 import qualified Data.Text as T
 import Text.Megaparsec (Pos)
 
+-- TODO: add support for specific integer/float sizes (i.e. i32, i64, f32, f64)
 data Type = Int'
   | Float'
   | String'
@@ -61,6 +62,14 @@ data Var = Var
   , varValue    :: SExpr
   } deriving (Show, Eq)
 
+-- TODO: expand the macro system to be able to pass in values, similar to Lisp macros
+data Macro = Macro
+  { macStart :: LizPos
+  , macEnd   :: LizPos
+  , macIdent :: T.Text
+  , macValue :: SExpr
+  } deriving (Show, Eq)
+
 type LizPos = (Pos, Pos)
 
 newtype Program = Program [SExpr]
@@ -70,7 +79,9 @@ data SExpr = SEIdentifier T.Text LizPos LizPos
   | SELiteral   Type T.Text LizPos LizPos
   | SEComment
   | SEFunc      Func
+  | SEMacroDef  Macro
   | SEFuncCall  LizPos LizPos T.Text [SExpr] -- ident - values
+  | SEMacroCall LizPos LizPos T.Text
   | SEBlockStmt LizPos LizPos [SExpr]
   | SEIfStmt    LizPos LizPos SExpr SExpr (Maybe SExpr) -- cond - truebranch - optional falsebranch
   | SEReturn    LizPos LizPos SExpr

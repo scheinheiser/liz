@@ -6,6 +6,7 @@ module Liz.Parser where
 
 import qualified Liz.Common.Errors as E
 import qualified Data.Text as T
+import qualified Data.List.NonEmpty as NE
 import Liz.Common.Types
 
 import Data.String ( IsString (..))
@@ -52,7 +53,8 @@ lizReserved :: [T.Text]
 lizReserved = 
   [ "var", "set", "const", "if", "def", "return", "False",
     "True", "undefined", "not", "negate", "Int", "Float", 
-    "String", "Char", "Bool", "Unit", "print", "block"]
+    "String", "Char", "Bool", "Unit", "print", "block",
+    "macro", "call-macro"]
 
 lizSymbols :: Parser Char
 lizSymbols = choice
@@ -84,24 +86,24 @@ parseNested :: Parser SExpr
 parseNested = do
   s <- getCurrentPos
   v <- (do
-    value <- parseValue <|> (SEIdentifier <$> parseIdent True)
+    value <- parseValue <|> (SEIdentifier <$> parseIdent False)
     e <- getCurrentPos
     pure $ value s e) <|> parseSExpr
   pure v
 
 -- main parsing functions
 parseIdent :: Bool -> Parser T.Text
-parseIdent flag = do
+parseIdent shouldParseOp = do
   s <- letterChar
-  r <- takeWhileP (Just "alphanumeric character or '_'") valid
+  r <- takeWhileP (Just "alphanumeric character or '_' or '-'.") valid
   let ident = T.pack [s] <> r
 
-  if ident `elem` lizReserved && flag
+  if ident `elem` lizReserved && (not shouldParseOp)
   then reservedIdent ident
   else pure $ ident
   where
     valid :: Char -> Bool 
-    valid = liftA2 (||) isAlphaNum ('_' ==)
+    valid c = (liftA2 (||) isAlphaNum ('_' ==) c) || ('-' == c)
 
 parseUnit :: Parser T.Text
 parseUnit = string "()"
@@ -161,6 +163,26 @@ parseRet = do
   e <- getCurrentPos
   pure $ SEReturn s e v
 
+parseMacroDef :: Parser SExpr
+parseMacroDef = do
+  s <- getCurrentPos
+  _ <- string "macro"
+  hspace1
+  i <- parseIdent False
+  hspace1
+  v <- parseNested
+  e <- getCurrentPos
+  pure $ SEMacroDef $ Macro s e i v
+
+parseMacroCall :: Parser SExpr
+parseMacroCall = do
+  s <- getCurrentPos
+  _ <- string "call-macro"
+  hspace1
+  i <- parseIdent False
+  e <- getCurrentPos
+  pure $ SEMacroCall s e i
+
 parseComment :: Parser SExpr
 parseComment = do
   _ <- char ';'
@@ -175,7 +197,7 @@ parseVarDecl = do
   s <- getCurrentPos
   decType <- SEVar s <$ string "var" <|> SEConst s <$ string "const"
   _ <- some hspace1
-  ident <- parseIdent True
+  ident <- parseIdent False
   _ <- some hspace1 
   ty <- (liftM SEType parseType) <|> parseNested
   aux decType ident ty
@@ -195,7 +217,7 @@ parseSetStmt = do
   s <- getCurrentPos
   _ <- string "set"
   hspace1
-  ident <- parseIdent True
+  ident <- parseIdent False
   hspace1
   value <- parseNested
   e <- getCurrentPos
@@ -206,7 +228,7 @@ parseFuncDecl = do
    s <- getCurrentPos
    _ <- string "def"
    hspace1
-   ident <- (parseIdent True) <|> parseOpId
+   ident <- (parseIdent False) <|> parseOpId
    hspace1
    args <- parseFuncArgs
    hidden hspace
@@ -218,7 +240,6 @@ parseFuncDecl = do
    e <- getCurrentPos
    pure $ SEFunc Func {funcIdent = ident, funcStart = s, funcEnd = e, funcArgs = args, funcReturnType = retTy, funcBody = block}
    where
-
     parseOpId :: Parser T.Text
     parseOpId = do
       _ <- char '('
@@ -233,7 +254,7 @@ parseFuncDecl = do
        aux :: Parser Arg
        aux = do
          hidden hspace
-         ident <- (parseIdent True)
+         ident <- (parseIdent False)
          hidden hspace
          _ <- char '~'
          hidden hspace
@@ -244,7 +265,7 @@ parseFuncDecl = do
 parseFuncCall :: Parser SExpr
 parseFuncCall = do
   s <- getCurrentPos
-  ident <- (parseIdent False) <|> parseOpId
+  ident <- (parseIdent True) <|> parseOpId
   hspace1
   args <- parseCallArgs
   e <- getCurrentPos
@@ -310,7 +331,7 @@ parseIfStmt = do
   hspace
   cond <- parseNested
   hspace
-  block <- some $ L.lineFold scn $ \_ -> parseSExpr
+  block <- some $ L.lineFold scn $ \_ -> parseSExpr <?> "if-sexpr branch"
   e <- getCurrentPos
   case () of _
               | length block > 2 -> tooManyExprsIf
@@ -328,6 +349,8 @@ parseSExpr = (between (char '(') (char ')') $
             , parseIfStmt
             , parseRet
             , parsePrint
+            , parseMacroDef
+            , parseMacroCall
             , parseBlock
             , parseFuncCall
             ])) <|> parseComment

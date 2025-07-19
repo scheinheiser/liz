@@ -9,7 +9,7 @@ import qualified Data.Text as T
 import qualified Data.List.NonEmpty as NE
 import Liz.Common.Types
 
-import Data.String ( IsString (..))
+import Data.String (IsString (..))
 import Data.Char (isAlphaNum, isDigit, isPrint) 
 import Control.Monad (void, liftM)
 
@@ -45,6 +45,9 @@ wrongArgCount ex got = customFailure $ E.WrongArgCount ex got
 -- helper parsing functions
 getCurrentPos :: Parser (Pos, Pos) 
 getCurrentPos = getSourcePos >>= \p -> pure (sourceLine p, sourceColumn p)
+
+head' :: [a] -> a
+head' = NE.head . NE.fromList
 
 scn :: Parser ()
 scn = L.space space1 (void $ spaceChar <|> tab) empty
@@ -271,10 +274,15 @@ parseFuncCall = do
   e <- getCurrentPos
   case () of _
               | ident `elem` binaryOp ->
-                if length args == 2 then let [l, r] = args in pure $ SEBinary (fromBinaryOp ident) s e l r
-                                    else wrongArgCount 2 (length args)
+                if length args == 2 
+                then 
+                  let 
+                    l = head' args 
+                    r = NE.last . NE.fromList $ args
+                  in pure $ SEBinary (fromBinaryOp ident) s e l r
+                else wrongArgCount 2 (length args)
               | ident `elem` unaryOp ->
-                if length args == 1 then let [v] = args in pure $ SEUnary (fromUnaryOp ident) s e v
+                if length args == 1 then let v = head' args in pure $ SEUnary (fromUnaryOp ident) s e v
                                     else wrongArgCount 1 (length args)
               | otherwise -> pure $ SEFuncCall s e ident args
   where
@@ -335,9 +343,12 @@ parseIfStmt = do
   e <- getCurrentPos
   case () of _
               | length block > 2 -> tooManyExprsIf
-              | length block == 1 -> pure $ SEIfStmt s e cond (head block) Nothing -- using head since the list can't be empty.
+              | length block == 1 -> pure $ SEIfStmt s e cond (head' block) Nothing
               | otherwise ->
-                let [truebr, falsebr] = block in
+                let 
+                  truebr = head' block 
+                  falsebr = NE.last . NE.fromList $ block
+                in
                 pure $ SEIfStmt s e cond truebr (Just falsebr)
 
 parseSExpr :: Parser SExpr

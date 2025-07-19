@@ -23,12 +23,6 @@ spec = do
     it "parse a char" $ do
       parse P.parseChar "" "'!'" `shouldParse` "!"
 
-    -- it "parse an integer" $ do
-    --   parse P.parseNum "" "42" `shouldParse` (L.SELiteral L.Int' "42")
-    --
-    -- it "parse a float" $ do
-    --   parse P.parseNum "" "999.999" `shouldParse` "999.999"
-
     it "parse a unit" $ do
       parse P.parseUnit "" "()" `shouldParse` "()"
 
@@ -231,3 +225,21 @@ spec = do
           (L.SEBinary L.Greater (mkPos 1, mkPos 6) (mkPos 1, mkPos 12) (L.SELiteral L.Int' "10" (mkPos 1, mkPos 8) (mkPos 1, mkPos 10)) (L.SELiteral L.Int' "5" (mkPos 1, mkPos 11) (mkPos 1, mkPos 12)))
           (L.SEPrint (mkPos 2, mkPos 4) (mkPos 2, mkPos 32) (L.SELiteral L.String' "10 is greater than 5" (mkPos 2, mkPos 10) (mkPos 2, mkPos 32)))
           (Just ((L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 35) (L.SELiteral L.String' "10 isn't greater than 5" (mkPos 3, mkPos 10) (mkPos 3, mkPos 35))))))
+    describe "Macros" $ do
+      it "parse a macro declaration" $ do
+        let input = "(macro boom (print \"explode\"))"
+        parse P.parseSExpr "" input `shouldParse` (L.SEMacroDef 
+          (L.Macro 
+            (mkPos 1, mkPos 2) 
+            (mkPos 1, mkPos 30) 
+            "boom" 
+            (L.SEPrint 
+              (mkPos 1, mkPos 14) 
+              (mkPos 1, mkPos 29) 
+              (L.SELiteral L.String' "explode" (mkPos 1, mkPos 20) (mkPos 1, mkPos 29)))))
+      it "parse a macro call" $ do
+        let input = "(call-macro mymac)"
+        parse P.parseSExpr "" input `shouldParse` (L.SEMacroCall
+          (mkPos 1, mkPos 2)
+          (mkPos 1, mkPos 18)
+          "mymac")

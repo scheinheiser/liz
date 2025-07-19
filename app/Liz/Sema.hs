@@ -47,7 +47,24 @@ mkMacroTbl :: MacroTbl
 mkMacroTbl = M.empty
 
 head' :: [a] -> a
-head' = (NE.head . NE.fromList)
+head' = NE.head . NE.fromList
+
+-- if there's a 'none' value, then it must be a macro definition.
+hasMacroDef :: [Maybe L.SExpr] -> Bool
+hasMacroDef l = aux l /= 0
+  where
+    aux :: [Maybe L.SExpr] -> Int
+    aux [] = 0
+    aux (x : xs) =
+      if x == Nothing then 1 + aux xs
+                      else aux xs
+
+subBody :: [L.SExpr] -> MacroTbl -> [Either [E.SemErr] (Maybe L.SExpr)]
+subBody exprs t = reverse $ aux exprs t
+  where
+    aux :: [L.SExpr] -> MacroTbl -> [Either [E.SemErr] (Maybe L.SExpr)]
+    aux [] _ = []
+    aux (x : xs) tbl = let (res, tbl') = macroSub x tbl in res : aux xs tbl'
 
 simpleSub :: (L.SExpr -> L.SExpr) -> (L.LizPos, L.LizPos) -> L.SExpr -> MacroTbl -> (Either [E.SemErr] (Maybe L.SExpr), MacroTbl)
 simpleSub dec (s, e) v tbl =
@@ -57,7 +74,7 @@ simpleSub dec (s, e) v tbl =
   in
   case () of _
               | length value_errs /= 0 -> (Left value_errs, tbl)
-              | countNothing subbed_value' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
+              | hasMacroDef subbed_value' -> (Left [E.NonGlblMacroDef s e], tbl)
               | otherwise ->
                 let filtered_value = head' $ catMaybes subbed_value' in
                 (Right (Just $ dec filtered_value), tbl)
@@ -70,25 +87,11 @@ multiSub dec (s, e) body tbl =
   in
   case () of _
               | length errs /= 0 -> (Left errs, tbl)
-              | countNothing subbed_body' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
+              | hasMacroDef subbed_body' -> (Left [E.NonGlblMacroDef s e], tbl)
               | otherwise ->
                 let filtered_body = dec $ catMaybes subbed_body' in
                 (Right $ Just filtered_body, tbl)
 
-subBody :: [L.SExpr] -> MacroTbl -> [Either [E.SemErr] (Maybe L.SExpr)]
-subBody exprs t = reverse $ aux exprs t
-  where
-    aux :: [L.SExpr] -> MacroTbl -> [Either [E.SemErr] (Maybe L.SExpr)]
-    aux [] _ = []
-    aux (x : xs) tbl = let (res, tbl') = macroSub x tbl in res : aux xs tbl'
-
-countNothing :: Eq a => [Maybe a] -> Int
-countNothing [] = 0
-countNothing (x : xs) =
-  if x == Nothing then 1 + countNothing xs
-                  else countNothing xs
-
--- main sema functions
 analyseAndPrintErrs :: L.Program -> FilePath -> IO ()
 analyseAndPrintErrs (L.Program prog) f = do
   let (prog_errs, subbed_prog) = collectErrors (subBody prog mkMacroTbl) [] [] in
@@ -122,7 +125,7 @@ analyseAndPrintErrs (L.Program prog) f = do
 
 -- TODO: Allow declarations in any order.
 analyseProgram :: L.Program -> Either [E.SemErr] L.Program
-analyseProgram p@(L.Program prog) = 
+analyseProgram (L.Program prog) = 
   let (prog_errs, subbed_prog) = collectErrors (subBody prog mkMacroTbl) [] [] in
   if length prog_errs /= 0 
   then Left prog_errs
@@ -152,6 +155,7 @@ analyseProgram p@(L.Program prog) =
         (res, env') = infer ex env
       in aux exprs env' hasMain (res : acc)
 
+-- main macro sub function
 macroSub :: L.SExpr -> MacroTbl -> (Either [E.SemErr] (Maybe L.SExpr), MacroTbl)
 macroSub (L.SEMacroDef (L.Macro s e i expr)) tbl
             | i `M.member` tbl = (Left [E.IdentifierAlreadyInUse s e i], tbl)
@@ -219,9 +223,9 @@ macroSub (L.SEIfStmt s e cond tbranch (Just fbranch)) tbl =
               | length cond_err /= 0 -> (Left cond_err, tbl)
               | length tbranch_err /= 0 -> (Left tbranch_err, tbl)
               | length fbranch_err /= 0 -> (Left fbranch_err, tbl)
-              | countNothing subbed_cond' /= 0 
-                || countNothing subbed_tbranch' /= 0 
-                  || countNothing subbed_fbranch' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
+              | hasMacroDef subbed_cond'
+                || hasMacroDef subbed_tbranch'
+                  || hasMacroDef subbed_fbranch' -> (Left [E.NonGlblMacroDef s e], tbl)
               | otherwise ->
                 let
                   filtered_cond = head' $ catMaybes subbed_cond'
@@ -244,8 +248,8 @@ macroSub (L.SEBinary op s e l r) tbl =
                 && length right_err /= 0 -> (Left $ left_err <> right_err, tbl)
               | length left_err /= 0 -> (Left left_err, tbl)
               | length right_err /= 0 -> (Left right_err, tbl)
-              | countNothing subbed_left' /= 0 
-                || countNothing subbed_right' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
+              | hasMacroDef subbed_left'
+                || hasMacroDef subbed_right' -> (Left [E.NonGlblMacroDef s e], tbl)
               | otherwise ->
                 let 
                   filtered_left = head' $ catMaybes subbed_left'
@@ -258,6 +262,7 @@ macroSub (L.SEConst s e (L.Var i t v)) tbl = simpleSub (\x -> L.SEConst s e (L.V
 macroSub (L.SESet s e i v) tbl = simpleSub (L.SESet s e i) (s, e) v tbl
 macroSub v tbl = (Right $ Just v, tbl)
 
+-- main typechecking/sema functions.
 infer :: L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
 infer (L.SEIdentifier iden s e) env = inferIdentifier s e iden env
 infer (L.SELiteral ty _ _ _) env = (Right ty, env)

@@ -442,3 +442,40 @@ spec = do
           let parsed = P.parseFile "" input
           let output = getOutput parsed
           (analyseProgram output) `shouldBe` (Left [E.IncorrectType (mkPos 3, mkPos 6) (mkPos 3, mkPos 24) L.String' L.Int'])
+      describe "Macros" $ do
+        it "Fail checking a macro local to a function." $ do
+          let input = """
+            (def main [] > Unit 
+            \&  (macro hello-world "hello world!")
+            \&  (print (call-macro hello-world)))\
+          \"""
+          let parsed = P.parseFile "" input
+          let output = getOutput parsed
+          (S.analyseProgram output) `shouldBe` (Left [E.NonGlblMacroDef (mkPos 1, mkPos 2) (mkPos 3, mkPos 35)])
+        it "Fail checking a recursive macro definition." $ do
+          let input = """
+            (macro hello-world (block 
+            \&  (print "hello, world!")
+            \&  (call-macro hello-world)))
+            (def main [] > Unit 
+            \&  (call-macro hello-world))\
+          \"""
+          let parsed = P.parseFile "" input
+          let output = getOutput parsed
+          (S.analyseProgram output) `shouldBe` (Left [E.RecursiveMacroDef (mkPos 1, mkPos 2) (mkPos 3, mkPos 28) "hello-world", E.UndefinedIdentifier (mkPos 5, mkPos 4) (mkPos 5, mkPos 26) "hello-world"])
+        it "Check a program with an expanded macro." $ do
+          let input = """
+            (macro hello-world "hello world!")
+            (def main [] > Unit 
+            \&  (print (call-macro hello-world)))\
+          \"""
+          let parsed = P.parseFile "" input
+          let output = getOutput parsed
+          (S.analyseProgram output) `shouldBe` (Right $ L.Program [L.SEFunc $ L.Func {
+              funcIdent = "main",
+              funcStart = (mkPos 2, mkPos 2),
+              funcEnd = (mkPos 3, mkPos 35),
+              funcArgs = [],
+              funcReturnType = L.Unit',
+              funcBody = [(L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 34) $ L.SELiteral L.String' "hello world!" (mkPos 1, mkPos 20) (mkPos 1, mkPos 34))]
+            }])

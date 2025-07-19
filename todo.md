@@ -7,6 +7,7 @@
 - [x] Change `func` to `def`
 - [x] Add syntax to define custom operators (maybe `(def (<$>) [...] (...))` ?)
 - [x] Add `block` keyword for a block of expressions.
+- [x] Add `macro` and `call-macro` keyword.
 
 ## Semantic Analysis
 - [x] Check that there's a `main` func, check that variables outside have the global tag? Up for change, really. (main checking is implemented)
@@ -15,6 +16,7 @@
 - [x] Function calls (arg checking, correct no. of args).
 - [x] Type checking.
 - [x] Pretty errors.
+- [x] Macro substitution
 - [ ] Allow declarations in any order.
 
 ## IR

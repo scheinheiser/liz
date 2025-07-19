@@ -10,6 +10,7 @@ import qualified Liz.Common.Logging as Log
 import qualified Liz.Common.Types as L
 import qualified Data.Map as M
 import qualified Data.Text as T
+import qualified Data.List.NonEmpty as NE
 
 import Data.Either (lefts)
 import Data.Maybe (catMaybes)
@@ -27,15 +28,52 @@ type MacroTbl = M.Map T.Text L.SExpr
 mkEnv :: Env
 mkEnv = Env {envFuncs = M.empty, envVars = M.empty, envConsts = M.empty}
 
-mkMacroTbl :: MacroTbl
-mkMacroTbl = M.empty
-
 inferBody :: [L.SExpr] -> Env -> [Either [E.SemErr] L.Type]
 inferBody exprs e = reverse $ aux exprs e
   where
     aux :: [L.SExpr] -> Env -> [Either [E.SemErr] L.Type]
     aux [] _ = []
     aux (x : xs) env = let (res, env') = infer x env in res : aux xs env'
+
+collectErrors :: [Either [E.SemErr] a] -> [E.SemErr] -> [a] -> ([E.SemErr], [a])
+collectErrors [] errs others = (errs, others)
+collectErrors (x : xs) errs others =
+  case x of
+    Left e -> collectErrors xs (e <> errs) others
+    Right t -> collectErrors xs errs (t : others)
+
+-- helper macro functions
+mkMacroTbl :: MacroTbl
+mkMacroTbl = M.empty
+
+head' :: [a] -> a
+head' = (NE.head . NE.fromList)
+
+simpleSub :: (L.SExpr -> L.SExpr) -> (L.LizPos, L.LizPos) -> L.SExpr -> MacroTbl -> (Either [E.SemErr] (Maybe L.SExpr), MacroTbl)
+simpleSub dec (s, e) v tbl =
+  let 
+    (subbed_value, _) = macroSub v tbl 
+    (value_errs, subbed_value') = collectErrors [subbed_value] [] []
+  in
+  case () of _
+              | length value_errs /= 0 -> (Left value_errs, tbl)
+              | countNothing subbed_value' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
+              | otherwise ->
+                let filtered_value = head' $ catMaybes subbed_value' in
+                (Right (Just $ dec filtered_value), tbl)
+
+multiSub :: ([L.SExpr] -> L.SExpr) -> (L.LizPos, L.LizPos) -> [L.SExpr] -> MacroTbl -> (Either [E.SemErr] (Maybe L.SExpr), MacroTbl)
+multiSub dec (s, e) body tbl =
+  let 
+    subbed_body = subBody body tbl 
+    (errs, subbed_body')  = collectErrors subbed_body [] []
+  in
+  case () of _
+              | length errs /= 0 -> (Left errs, tbl)
+              | countNothing subbed_body' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
+              | otherwise ->
+                let filtered_body = dec $ catMaybes subbed_body' in
+                (Right $ Just filtered_body, tbl)
 
 subBody :: [L.SExpr] -> MacroTbl -> [Either [E.SemErr] (Maybe L.SExpr)]
 subBody exprs t = reverse $ aux exprs t
@@ -50,26 +88,25 @@ countNothing (x : xs) =
   if x == Nothing then 1 + countNothing xs
                   else countNothing xs
 
-collectErrors :: [Either [E.SemErr] a] -> [E.SemErr] -> [a] -> ([E.SemErr], [a])
-collectErrors [] errs others = (errs, others)
-collectErrors (x : xs) errs others =
-  case x of
-    Left e -> collectErrors xs (e <> errs) others
-    Right t -> collectErrors xs errs (t : others)
-
 -- main sema functions
-testing :: L.Program -> FilePath -> IO ()
-testing (L.Program prog) f = do
-  let
-    (res, hasMain) = aux prog mkEnv 0 []
-    errs = fold $ lefts res
-  case () of _
-              | length errs /= 0 && hasMain > 1 -> Log.printErrs f (E.MultipleEntrypoints : errs) []
-              | length errs /= 0 && hasMain == 0 -> Log.printErrs f (E.NoEntrypoint : errs) []
-              | length errs /= 0 -> Log.printErrs f errs []
-              | hasMain == 0 -> Log.printErrs f [E.NoEntrypoint] []
-              | hasMain > 1 -> Log.printErrs f [E.MultipleEntrypoints] []
-              | otherwise -> putStrLn "all good"
+analyseAndPrintErrs :: L.Program -> FilePath -> IO ()
+analyseAndPrintErrs (L.Program prog) f = do
+  let (prog_errs, subbed_prog) = collectErrors (subBody prog mkMacroTbl) [] [] in
+    if length prog_errs /= 0 
+    then Log.printErrs f prog_errs []
+    else 
+      let
+        subbed_prog' = catMaybes subbed_prog
+        (res, hasMain) = aux subbed_prog' mkEnv 0 []
+        errs = fold $ lefts res
+      in
+      case () of _
+                  | length errs /= 0 && hasMain > 1 -> Log.printErrs f (E.MultipleEntrypoints : errs) []
+                  | length errs /= 0 && hasMain == 0 -> Log.printErrs f (E.NoEntrypoint : errs) []
+                  | length errs /= 0 -> Log.printErrs f errs []
+                  | hasMain == 0 -> Log.printErrs f [E.NoEntrypoint] []
+                  | hasMain > 1 -> Log.printErrs f [E.MultipleEntrypoints] []
+                  | otherwise -> putStrLn "all good"
   where
     aux :: [L.SExpr] -> Env -> Int -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Int)
     aux [] _ hasMain acc = (acc, hasMain)
@@ -83,21 +120,10 @@ testing (L.Program prog) f = do
         (res, next) = infer ex sym
       in aux exprs next hasMain (res : acc)
 
-bruh :: L.Program -> Either [E.SemErr] L.Program
-bruh p@(L.Program prog) = 
-  let
-    (prog_errs, subbed_prog) = collectErrors (subBody prog mkMacroTbl) [] []
-  in
-  if length prog_errs /= 0 
-  then Left prog_errs
-  else Right $ L.Program (catMaybes subbed_prog)
-
 -- TODO: Allow declarations in any order.
 analyseProgram :: L.Program -> Either [E.SemErr] L.Program
 analyseProgram p@(L.Program prog) = 
-  let
-    (prog_errs, subbed_prog) = collectErrors (subBody prog mkMacroTbl) [] []
-  in
+  let (prog_errs, subbed_prog) = collectErrors (subBody prog mkMacroTbl) [] [] in
   if length prog_errs /= 0 
   then Left prog_errs
   else
@@ -152,28 +178,8 @@ macroSub (L.SEMacroCall s e i) tbl =
   case value of
     Nothing -> (Left [E.UndefinedIdentifier s e i], tbl)
     Just expr -> (Right (Just expr), tbl)
-macroSub (L.SEFunc f@(L.Func _ s e _ _ body)) tbl =
-  let 
-    subbed_body = subBody body tbl 
-    (errs, subbed_body')  = collectErrors subbed_body [] []
-  in
-  case () of _
-              | length errs /= 0 -> (Left errs, tbl)
-              | countNothing subbed_body' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
-              | otherwise ->
-                let filtered_body = L.SEFunc $ f {L.funcBody = catMaybes subbed_body'} in 
-                (Right $ Just filtered_body, tbl)
-macroSub (L.SEBlockStmt s e body) tbl =
-  let
-    subbed_body = subBody body tbl
-    (errs, subbed_body')  = collectErrors subbed_body [] []
-  in
-  case () of _
-              | length errs /= 0 -> (Left errs, tbl)
-              | countNothing subbed_body' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
-              | otherwise ->
-                let filtered_body = L.SEBlockStmt s e $ catMaybes subbed_body' in 
-                (Right $ Just filtered_body, tbl)
+macroSub (L.SEFunc f@(L.Func _ s e _ _ body)) tbl = multiSub (\x -> L.SEFunc $ f{L.funcBody = x}) (s, e) body tbl
+macroSub (L.SEBlockStmt s e body) tbl = multiSub (L.SEBlockStmt s e) (s, e) body tbl
 macroSub (L.SEIfStmt s e cond branch Nothing) tbl =
   let
     (subbed_cond, _) = macroSub cond tbl
@@ -187,8 +193,8 @@ macroSub (L.SEIfStmt s e cond branch Nothing) tbl =
               | length branch_err /= 0 -> (Left branch_err, tbl)
               | otherwise ->
                 let
-                  [filtered_cond] = catMaybes subbed_cond'
-                  [filtered_branch] = catMaybes subbed_branch'
+                  filtered_cond = head' $ catMaybes subbed_cond'
+                  filtered_branch = head' $ catMaybes subbed_branch'
                   expr = L.SEIfStmt s e filtered_cond filtered_branch Nothing
                 in (Right $ Just expr, tbl)
 macroSub (L.SEIfStmt s e cond tbranch (Just fbranch)) tbl =
@@ -201,53 +207,31 @@ macroSub (L.SEIfStmt s e cond tbranch (Just fbranch)) tbl =
     (fbranch_err, subbed_fbranch') = collectErrors [subbed_fbranch] [] []
   in
   case () of _
-              | length cond_err /= 0 && length tbranch_err /= 0 && length fbranch_err /= 0 -> (Left $ cond_err <> tbranch_err <> fbranch_err, tbl)
-              | length cond_err /= 0 && length tbranch_err /= 0 -> (Left $ cond_err <> tbranch_err, tbl)
-              | length cond_err /= 0 && length fbranch_err /= 0 -> (Left $ cond_err <> fbranch_err, tbl)
-              | length tbranch_err /= 0 && length fbranch_err /= 0 -> (Left $ tbranch_err <> fbranch_err, tbl)
+              | length cond_err /= 0 
+                && length tbranch_err /= 0 
+                  && length fbranch_err /= 0 -> (Left $ cond_err <> tbranch_err <> fbranch_err, tbl)
+              | length cond_err /= 0 
+                && length tbranch_err /= 0 -> (Left $ cond_err <> tbranch_err, tbl)
+              | length cond_err /= 0 
+                && length fbranch_err /= 0 -> (Left $ cond_err <> fbranch_err, tbl)
+              | length tbranch_err /= 0 
+                && length fbranch_err /= 0 -> (Left $ tbranch_err <> fbranch_err, tbl)
               | length cond_err /= 0 -> (Left cond_err, tbl)
               | length tbranch_err /= 0 -> (Left tbranch_err, tbl)
               | length fbranch_err /= 0 -> (Left fbranch_err, tbl)
+              | countNothing subbed_cond' /= 0 
+                || countNothing subbed_tbranch' /= 0 
+                  || countNothing subbed_fbranch' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
               | otherwise ->
                 let
-                  [filtered_cond] = catMaybes subbed_cond'
-                  [filtered_tbranch] = catMaybes subbed_tbranch'
-                  [filtered_fbranch] = catMaybes subbed_fbranch'
+                  filtered_cond = head' $ catMaybes subbed_cond'
+                  filtered_tbranch = head' $ catMaybes subbed_tbranch'
+                  filtered_fbranch = head' $ catMaybes subbed_fbranch'
                   expr = L.SEIfStmt s e filtered_cond filtered_tbranch (Just filtered_fbranch)
                 in (Right $ Just expr, tbl)
-macroSub (L.SEFuncCall s e i params) tbl = 
-  let 
-    subbed_params = subBody params tbl 
-    (param_errs, subbed_params') = collectErrors subbed_params [] []
-  in
-  case () of _
-              | length param_errs /= 0 -> (Left param_errs, tbl)
-              | countNothing subbed_params' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
-              | otherwise ->
-                let filtered_params = catMaybes subbed_params' in
-                (Right (Just $ L.SEFuncCall s e i filtered_params), tbl)
-macroSub (L.SEPrint s e v) tbl = 
-  let 
-    (subbed_value, _) = macroSub v tbl 
-    (value_errs, subbed_value') = collectErrors [subbed_value] [] []
-  in
-  case () of _
-              | length value_errs /= 0 -> (Left value_errs, tbl)
-              | countNothing subbed_value' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
-              | otherwise ->
-                let filtered_value = head $ catMaybes subbed_value' in
-                (Right (Just $ L.SEPrint s e filtered_value), tbl)
-macroSub (L.SEReturn s e v) tbl =
-  let 
-    (subbed_value, _) = macroSub v tbl 
-    (value_errs, subbed_value') = collectErrors [subbed_value] [] []
-  in
-  case () of _
-              | length value_errs /= 0 -> (Left value_errs, tbl)
-              | countNothing subbed_value' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
-              | otherwise ->
-                let filtered_value = head $ catMaybes subbed_value' in
-                (Right (Just $ L.SEReturn s e filtered_value), tbl)
+macroSub (L.SEFuncCall s e i params) tbl = multiSub (L.SEFuncCall s e i) (s, e) params tbl
+macroSub (L.SEPrint s e v) tbl = simpleSub (L.SEPrint s e) (s, e) v tbl
+macroSub (L.SEReturn s e v) tbl = simpleSub (L.SEReturn s e) (s, e) v tbl
 macroSub (L.SEBinary op s e l r) tbl =
   let
     (subbed_left, _) = macroSub l tbl
@@ -256,32 +240,22 @@ macroSub (L.SEBinary op s e l r) tbl =
     (right_err, subbed_right') = collectErrors [subbed_right] [] []
   in
   case () of _
-              | length left_err /= 0 && length right_err /= 0 -> (Left $ left_err <> right_err, tbl)
+              | length left_err /= 0 
+                && length right_err /= 0 -> (Left $ left_err <> right_err, tbl)
               | length left_err /= 0 -> (Left left_err, tbl)
               | length right_err /= 0 -> (Left right_err, tbl)
-              | countNothing subbed_left' /= 0 || countNothing subbed_right' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
+              | countNothing subbed_left' /= 0 
+                || countNothing subbed_right' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
               | otherwise ->
                 let 
-                  [filtered_left] = catMaybes subbed_left'
-                  [filtered_right] = catMaybes subbed_right'
+                  filtered_left = head' $ catMaybes subbed_left'
+                  filtered_right = head' $ catMaybes subbed_right'
                   expr = L.SEBinary op s e filtered_left filtered_right
                 in (Right $ Just expr, tbl)
-macroSub (L.SEUnary op s e v) tbl =
-  let
-    (subbed_value, _) = macroSub v tbl
-    (value_err, subbed_value') = collectErrors [subbed_value] [] []
-  in
-  case () of _
-              | length value_err /= 0 -> (Left value_err, tbl)
-              | countNothing subbed_value' /= 0 -> (Left [E.NonGlblMacroDef s e], tbl)
-              | otherwise ->
-                let 
-                  [filtered_value] = catMaybes subbed_value'
-                  expr = L.SEUnary op s e filtered_value
-                in (Right $ Just expr, tbl)
-macroSub (L.SEVar _ _ (L.Var _ _ v)) tbl = macroSub v tbl
-macroSub (L.SEConst _ _ (L.Var _ _ v)) tbl = macroSub v tbl
-macroSub (L.SESet _ _ _ v) tbl = macroSub v tbl
+macroSub (L.SEUnary op s e v) tbl = simpleSub (L.SEUnary op s e) (s, e) v tbl
+macroSub (L.SEVar s e (L.Var i t v)) tbl = simpleSub (\x -> L.SEVar s e (L.Var i t x)) (s, e) v tbl
+macroSub (L.SEConst s e (L.Var i t v)) tbl = simpleSub (\x -> L.SEConst s e (L.Var i t x)) (s, e) v tbl
+macroSub (L.SESet s e i v) tbl = simpleSub (L.SESet s e i) (s, e) v tbl
 macroSub v tbl = (Right $ Just v, tbl)
 
 infer :: L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
@@ -295,7 +269,7 @@ infer (L.SESet s e i v) env = inferSet s e i v env
 infer (L.SEReturn _ _ v) env = infer v env
 infer (L.SEPrint _ _ _) env = (Right L.Unit', env)
 infer (L.SEFunc f) env = inferFunc f env
-infer (L.SEBlockStmt s e body) env = inferBlock s e body env
+infer (L.SEBlockStmt _ _ body) env = inferBlock body env
 infer (L.SEFuncCall s e iden args) env = inferFuncCall s e iden args env
 infer (L.SEIfStmt s e cond tbr fbr) env = inferIfStmt s e cond tbr fbr env
 infer L.SEComment env = (Right L.String', env)
@@ -425,8 +399,8 @@ inferFunc (L.Func{..}) env@(Env{..})
     addArgs [] e = e
     addArgs ((i, t) : xs) e@(Env{envConsts=cenv}) = addArgs xs $ e{envConsts=M.insert i t cenv} -- args are constant by default
 
-inferBlock :: L.LizPos -> L.LizPos -> [L.SExpr] -> Env -> (Either [E.SemErr] L.Type, Env)
-inferBlock s e body env =
+inferBlock :: [L.SExpr] -> Env -> (Either [E.SemErr] L.Type, Env)
+inferBlock body env =
   let 
     result = inferBody body env
     (errs, types) = collectErrors result [] []

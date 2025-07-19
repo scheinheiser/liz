@@ -12,6 +12,7 @@ import Text.Megaparsec (unPos)
 import Text.Printf (printf)
 import Data.List (intercalate)
 
+-- NOTE: consider trying to actually get a slice of the line in the file for better error reporting
 prettifyErr :: SemErr -> FilePath -> [C.Chunk]
 prettifyErr expr fp =
   case expr of

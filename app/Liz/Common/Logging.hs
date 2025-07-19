@@ -18,7 +18,7 @@ prettifyErr expr fp =
     IncorrectType s e ex got -> formatError fp (Just (s, e)) (T.pack $ printf "Expected type '%s', but got '%s'.\n" (show ex) (show got)) Nothing
     IncorrectTypes s e ex got -> formatError fp (Just (s, e)) (T.pack $ printf "Expected types '%s', but got '%s'.\n" ex (intercalate "," $ map show got)) Nothing
     FailedLitInference s e lit -> formatError fp (Just (s, e)) (T.pack $ printf "Failed to infer the type of '%s'.\n" lit) Nothing
-    UndefinedIdentifier s e i -> formatError fp (Just (s, e)) (T.pack $ printf "Undefined identifier '%s'." i) (Just "Consider checking that the value is in scope.\n")
+    UndefinedIdentifier s e i -> formatError fp (Just (s, e)) (T.pack $ printf "Undefined identifier '%s'." i) (Just "Consider checking that the value is in scope. If it is a macro, ensure that it has been defined before its usage.\n")
     IdentifierAlreadyInUse s e i -> formatError fp (Just (s, e)) (T.pack $ printf "Identifier '%s' is already in use." i) (Just "Consider giving the identifier a different name.")
     AssigningToConstant s e i -> formatError fp (Just (s, e)) (T.pack $ printf "Attempted to assign to constant '%s'." i) (Just "Consider defining the value with 'var' instead of 'const'.\n")
     AssigningToFunction s e i -> formatError fp (Just (s, e)) (T.pack $ printf "Attempted to assign to the function '%s'." i) (Just $ T.pack $ printf "Did you mean to define '%s' as a function?\n" i)
@@ -32,6 +32,9 @@ prettifyErr expr fp =
     NoEntrypoint -> formatError fp Nothing ("Couldn't find entry point.") (Just "Consider adding a 'main' function.\n")
     MultipleEntrypoints -> formatError fp Nothing ("Multiple entry points in file.") (Just "Consider renaming one of them.\n")
     NotImplemented s -> formatError fp Nothing (T.pack $ printf "SExpression has not been implemented; '%s'.\n" (show s)) Nothing
+    InvalidArgType s e i t -> formatError fp (Just (s, e)) (T.pack $ printf "Invalid type has been given to function argument '%s' - '%s'." (show i) (show t)) (Just "An undefined/unit type arg is disallowed.")
+    RecursiveMacroDef s e i -> formatError fp (Just (s, e)) (T.pack $ printf "'%s' is a recursive macro definition.\n" (show i)) Nothing
+    NonGlblMacroDef s e -> formatError fp (Just (s, e)) "Invalid declaration of macro." (Just "Macros can only be defined locally.")
   where
     formatError :: FilePath -> Maybe (LizPos, LizPos) -> T.Text -> Maybe T.Text -> [C.Chunk]
     formatError f (Just (s, e)) errtxt (Just hinttxt) = (filePrefixWithLoc f s e) <> errorPrefix <> (errorText errtxt) <> (hintText hinttxt)

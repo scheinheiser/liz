@@ -22,6 +22,9 @@ data SemErr = IncorrectType LizPos LizPos Type Type -- expected type ; given typ
   | NoEntrypoint
   | MultipleEntrypoints
   | NotImplemented SExpr
+  | InvalidArgType LizPos LizPos T.Text Type
+  | RecursiveMacroDef LizPos LizPos T.Text
+  | NonGlblMacroDef LizPos LizPos
   deriving (Show, Eq)
 
 data PError = FailedTypeInference T.Text

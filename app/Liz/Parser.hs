@@ -367,7 +367,7 @@ parseSExpr = (between (char '(') (char ')') $
             ])) <|> parseComment
 
 parseProgram :: Parser [SExpr]
-parseProgram = some $ try $ scn >> parseSExpr
+parseProgram = some $ scn >> parseSExpr
 
 parseFile :: FilePath -> T.Text -> Either (ParseErrorBundle T.Text E.PError) Program
 parseFile f fc = do

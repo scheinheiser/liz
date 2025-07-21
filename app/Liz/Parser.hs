@@ -332,7 +332,7 @@ parseIfStmt = do
   hspace
   cond <- parseNested
   hspace
-  block <- some $ L.lineFold scn $ \_ -> parseSExpr <?> "if-sexpr branch"
+  block <- some $ L.lineFold scn $ \_ -> parseNested <?> "if-sexpr branch"
   e <- getCurrentPos
   case () of _
               | length block > 2 -> tooManyExprsIf

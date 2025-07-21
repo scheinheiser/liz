@@ -39,10 +39,8 @@ fromSExpr (L.SELiteral ty lit _ _) i at@(AllocTracker{..})=
         L.Int' -> (IRValue $ Integ $ read @Int (T.unpack lit), Nothing)
         L.Float' -> (IRValue $ Flt $ read @Double (T.unpack lit), Nothing)
         L.Bool' -> (IRValue $ Bln $ read @Bool (T.unpack lit), Nothing)
-        L.Char' -> (IRValue $ Chr $ read @Char (T.unpack lit), Nothing)
         L.Unit' -> (IRValue Unt, Nothing)
-        L.Undef' -> (IRValue Undf, Nothing)
-        L.String' ->
+        L.String'; L.Char' ->
           let allocStrs = lit : atAllocatedStrings in
           (IRValue $ Str $ T.show atStringIdx, Just $ at{atAllocatedStrings= allocStrs, atStringIdx=atStringIdx + 1})
   in
@@ -55,26 +53,26 @@ fromSExpr (L.SEBinary op _ _ l r) i at =
     (er, i'', at'') = fromSExpr r i' at'
     irOp = 
       case op of
-        L.Add -> IRBin L.Add
-        L.Subtract -> IRBin L.Subtract
-        L.Multiply -> IRBin L.Multiply
-        L.Divide -> IRBin L.Divide
-        L.Concat -> IRBin L.Concat
-        L.GreaterEql -> IRBin L.GreaterEql
-        L.LessEql -> IRBin L.LessEql
-        L.Eql -> IRBin L.Eql
-        L.NotEql -> IRBin L.NotEql
-        L.Greater -> IRBin L.Greater
-        L.Less -> IRBin L.Less
-  in (IRVar (tempVarIdent $ i'' + 1) (irOp el er), i'' + 1, at'')
+        L.Add -> IRBin (tempVarIdent $ i'' + 1) L.Add
+        L.Subtract -> IRBin (tempVarIdent $ i'' + 1) L.Subtract
+        L.Multiply -> IRBin (tempVarIdent $ i'' + 1) L.Multiply
+        L.Divide -> IRBin (tempVarIdent $ i'' + 1) L.Divide
+        L.Concat -> IRBin (tempVarIdent $ i'' + 1) L.Concat
+        L.GreaterEql -> IRBin (tempVarIdent $ i'' + 1) L.GreaterEql
+        L.LessEql -> IRBin (tempVarIdent $ i'' + 1) L.LessEql
+        L.Eql -> IRBin (tempVarIdent $ i'' + 1) L.Eql
+        L.NotEql -> IRBin (tempVarIdent $ i'' + 1) L.NotEql
+        L.Greater -> IRBin (tempVarIdent $ i'' + 1) L.Greater
+        L.Less -> IRBin (tempVarIdent $ i'' + 1) L.Less
+  in (irOp el er, i'' + 1, at'')
 fromSExpr (L.SEUnary op _ _ v) i at =
   let
     (ev, i', at') = fromSExpr v i at
     irOp = 
       case op of
-        L.Not -> IRUn L.Not
-        L.Negate -> IRUn L.Negate
-  in (IRVar (tempVarIdent $ i' + 1) (irOp ev), i' + 1, at')
+        L.Not -> IRUn (tempVarIdent $ i' + 1) L.Not
+        L.Negate -> IRUn (tempVarIdent $ i' + 1) L.Negate
+  in (irOp ev, i' + 1, at')
 fromSExpr (L.SEVar _ _ L.Var{varIdent=ident, varValue=val}) i at = 
   let (evaluated_value, i', at') = fromSExpr val i at in ((IRVar ident evaluated_value), i', at')
 fromSExpr (L.SEConst _ _ L.Var{varIdent=ident, varValue=val}) i at = 
@@ -99,17 +97,18 @@ fromSExpr (L.SEIfStmt _ _ cond tbranch Nothing) i at =
 fromSExpr (L.SEIfStmt _ _ cond tbranch (Just fbranch)) i at =
   let 
     (econd, i', at') = fromSExpr cond i at
-    (etbr, ti, at'') = fromSExpr tbranch i' at'
-    (efbr, i'', at''') = fromSExpr fbranch ti at''
+    (etbr, i'', at'') = fromSExpr tbranch i' at'
+    (efbr, i''', at''') = fromSExpr fbranch i'' at''
     label = "L"
     gotomain = "blank"
-  in (IRIf $ IfSt econd gotomain (label, Label (label, [etbr])) (Just (label, Label (label, [efbr]))), i'' + 1, at''')
+  in (IRIf $ IfSt econd gotomain (label, Label (label, [etbr])) (Just (label, Label (label, [efbr]))), i''' + 1, at''')
 fromSExpr (L.SEFuncCall _ _ ident vals) i at =
   let (eargs, i', at') = translateBody vals i at in
   (IRFuncCall ident eargs, i', at')
 fromSExpr (L.SEBlockStmt _ _ vals) i at =
   let (ebody, i', at') = translateBody vals i at in
   (IRBlockStmt $ reverse ebody, i', at')
+fromSExpr v _ _ = error (show v)
 
 -- FIX: detect if there's nested if statements
 applyLabels :: [IROp] -> Int -> ([IROp], Int)
@@ -188,7 +187,7 @@ patchJumps = aux . NE.toList
 
     getLast :: IROp -> IROp
     getLast (IRBlockStmt b) = getLast $ last b
-    getLast op@((IRBin _ _ _);(IRUn _ _)) = op
+    getLast op@((IRBin _ _ _ _);(IRUn _ _ _)) = op
     getLast op@(IRFuncCall _ _) = op
     getLast (IRVar i _) = IRIdent i
     getLast (IRConst i _) = IRIdent i

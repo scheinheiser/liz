@@ -4,6 +4,7 @@
 module Liz.Common.Types where
 
 import qualified Data.Text as T
+import Prettyprinter (Pretty (..))
 import Text.Megaparsec (Pos)
 
 -- TODO: add support for specific integer/float sizes (i.e. i32, i64, f32, f64)
@@ -13,7 +14,6 @@ data Type = Int'
   | Char'
   | Bool'
   | Unit'
-  | Undef'
   deriving (Eq)
 
 instance Show Type where
@@ -23,7 +23,14 @@ instance Show Type where
   show Char' = "Char"
   show Bool' = "Bool"
   show Unit' = "Unit"
-  show Undef' = "Undefined"
+
+instance Pretty Type where
+  pretty Int' = "int"
+  pretty Float' = "float"
+  pretty String' = "str"
+  pretty Char' = "char"
+  pretty Bool' = "bool"
+  pretty Unit' = "unit"
 
 data BinaryOp = Add
   | Subtract

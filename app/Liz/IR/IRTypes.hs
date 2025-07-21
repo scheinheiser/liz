@@ -25,19 +25,15 @@ data Val = Integ Int
   | Bln Bool
   | Flt Double
   | Str T.Text
-  | Chr Char
   | Unt 
-  | Undf
   deriving Show
 
 instance Pretty Val where
   pretty (Integ i) = viaShow i
   pretty (Flt i) = viaShow i
   pretty (Bln i) = viaShow i
-  pretty (Str i) = viaShow i
-  pretty (Chr i) = viaShow i
+  pretty (Str i) = (pretty @T.Text "string[") <> pretty i <> rbracket
   pretty Unt = pretty @T.Text "()"
-  pretty Undf = pretty @T.Text "undefined"
 
 data Fn = Fn T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
   deriving Show
@@ -55,17 +51,10 @@ instance Pretty IfSt where
 
 type IRBlock = [IROp]
 
-data IROp = -- IRInt Int
-  -- | IRBool Bool 
-  -- | IRFloat Double
-  -- | IRString T.Text
-  -- | IRChar Char 
-  -- | IRUnit
-  -- | IRUndef
-  IRValue Val
+data IROp = IRValue Val
   | IRIdent T.Text
-  | IRBin L.BinaryOp IROp IROp
-  | IRUn L.UnaryOp IROp
+  | IRBin T.Text L.BinaryOp IROp IROp
+  | IRUn T.Text L.UnaryOp IROp
   | IRRet IROp
   | IRPrint IROp
   | IRVar T.Text IROp
@@ -80,17 +69,10 @@ data IROp = -- IRInt Int
   deriving Show
 
 instance Pretty IROp where
-  -- pretty (IRInt v) = viaShow v
-  -- pretty (IRFloat v) = viaShow v
-  -- pretty (IRBool v) = viaShow v
-  -- pretty (IRString v) = (pretty @T.Text "string[") <> (pretty v) <> (pretty @T.Text "]")
-  -- pretty (IRChar v) = viaShow v
-  -- pretty (IRUndef) = pretty @T.Text "undefined"
-  -- pretty (IRUnit) = pretty @T.Text "()"
   pretty (IRValue v) = pretty v
   pretty (IRIdent i) = pretty @T.Text i
-  pretty (IRBin op l r) = formatBinary op l r
-  pretty (IRUn op v) = formatUnary op v
+  pretty (IRBin i op l r) = formatBinary i op l r
+  pretty (IRUn i op v) = formatUnary i op v
   pretty (IRRet v) = formatPrintOrRet "ret" v
   pretty (IRPrint v) = formatPrintOrRet "print" v
   pretty (IRVar i v) = formatVar "var" i v
@@ -112,11 +94,11 @@ instance Pretty IROp where
 
 -- helper pretty functions
 formatVar :: T.Text -> T.Text -> IROp -> Doc ann
-formatVar dec ident v@(IRVar i _) = 
+formatVar dec ident v@(IRBin i _ _ _) = 
   (pretty v) <> line 
     <> (pretty dec) <+> (pretty ident) 
       <+> (pretty @T.Text "=") <+> (pretty i)
-formatVar dec ident v@(IRConst i _) = 
+formatVar dec ident v@(IRUn i _ _) = 
   (pretty v) <> line 
     <> (pretty dec) <+> (pretty ident) 
       <+> (pretty @T.Text "=") <+> (pretty i)
@@ -124,65 +106,57 @@ formatVar dec ident v =
   (pretty @T.Text dec) <+> (pretty ident) 
     <+> (pretty @T.Text "=") <+> (pretty v)
 
-formatBinary :: L.BinaryOp -> IROp -> IROp -> Doc ann
-formatBinary op l@(IRVar li _) r@(IRVar ri _) = 
-  (pretty l) <> line <> (pretty r) 
-    <> line <> (pretty li) 
-      <+> (pretty $ binaryToText op) 
-        <+> (pretty ri)
-formatBinary op l@(IRConst li _) r@(IRConst ri _) = 
-  (pretty l) <> line <> (pretty r) 
-    <> line <> (pretty li) 
-      <+> (pretty $ binaryToText op) 
-        <+> (pretty ri)
-formatBinary op l@(IRVar li _) r@(IRConst ri _) = 
-  (pretty l) <> line <> (pretty r) 
-    <> line <> (pretty li) 
-      <+> (pretty $ binaryToText op) 
-        <+> (pretty ri)
-formatBinary op l@(IRConst li _) r@(IRVar ri _) = 
-  (pretty l) <> line <> (pretty r) 
-    <> line <> (pretty li) 
-      <+> (pretty $ binaryToText op) 
-        <+> (pretty ri)
-formatBinary op l@(IRVar li _) r = 
-  (pretty l) <> line <> (pretty li) 
-    <+> (pretty $ binaryToText op) 
-      <+> (pretty r)
-formatBinary op l@(IRConst li _) r = 
-  (pretty l) <> line <> (pretty li) 
-    <+> (pretty $ binaryToText op) 
-      <+> (pretty r)
-formatBinary op l r@(IRVar ri _) = 
-  (pretty r) <> line <> (pretty l) 
-    <+> (pretty $ binaryToText op) 
-      <+> (pretty ri)
-formatBinary op l r@(IRConst ri _) = 
-  (pretty r) <> line <> (pretty l) 
-    <+> (pretty $ binaryToText op) 
-      <+> (pretty ri)
-formatBinary op l r = 
-  (pretty l) 
-    <+> (pretty $ binaryToText op) 
-      <+> (pretty r)
+formatBinary :: T.Text -> L.BinaryOp -> IROp -> IROp -> Doc ann
+formatBinary i op l@(IRBin li _ _ _) r@(IRBin ri _ _ _) =
+  (pretty l) <> line 
+    <> (pretty r) <> line 
+      <> (pretty @T.Text "var") <+> (pretty i) 
+        <+> (pretty @T.Text "=") <+> (pretty li) 
+          <+> (pretty $ binaryToText op) <+> (pretty ri)
+formatBinary i op l@(IRUn li _ _) r@(IRBin ri _ _ _) =
+  (pretty l) <> line 
+    <> (pretty r) <> line 
+      <> (pretty @T.Text "var") <+> (pretty i) 
+        <+> (pretty @T.Text "=") <+> (pretty li) 
+          <+> (pretty $ binaryToText op) <+> (pretty ri)
+formatBinary i op l@(IRBin li _ _ _) r@(IRUn ri _ _) =
+  (pretty l) <> line 
+    <> (pretty r) <> line 
+      <> (pretty @T.Text "var") <+> (pretty i) 
+        <+> (pretty @T.Text "=") <+> (pretty li) 
+          <+> (pretty $ binaryToText op) <+> (pretty ri)
+formatBinary i op l@(IRUn li _ _) r@(IRUn ri _ _) =
+  (pretty l) <> line 
+    <> (pretty r) <> line 
+      <> (pretty @T.Text "var") <+> (pretty i) 
+        <+> (pretty @T.Text "=") <+> (pretty li) 
+          <+> (pretty $ binaryToText op) <+> (pretty ri)
+formatBinary i op l r =
+  (pretty @T.Text "var") <+> (pretty i) 
+    <+> (pretty @T.Text "=") <+> (pretty l) 
+      <+> (pretty $ binaryToText op) <+> (pretty r)
 
-formatUnary :: L.UnaryOp -> IROp -> Doc ann
-formatUnary op v@(IRVar i _) = 
+formatUnary :: T.Text -> L.UnaryOp -> IROp -> Doc ann
+formatUnary i op v@(IRUn vi _ _) =
   (pretty v) <> line 
-    <> (pretty $ unaryToText op) 
-      <+> (pretty i)
-formatUnary op v@(IRConst i _) = 
+    <> (pretty @T.Text "var") <+> (pretty i) 
+      <+> (pretty @T.Text "=") <+> (pretty $ unaryToText op) <+> (pretty vi) 
+formatUnary i op v@(IRBin vi _ _ _) =
   (pretty v) <> line 
-    <> (pretty $ unaryToText op) 
-      <+> (pretty i)
-formatUnary op v = (pretty @T.Text $ unaryToText op) <+> (pretty v)
+    <> (pretty @T.Text "var") <+> (pretty i) 
+      <+> (pretty @T.Text "=") <+> (pretty $ unaryToText op) 
+        <+> (pretty vi) 
+formatUnary i op v =
+  (pretty @T.Text "var") <+> (pretty i) 
+    <+> (pretty @T.Text "=") <+> (pretty $ unaryToText op) 
+      <+> (pretty v)
 
 formatPrintOrRet :: T.Text -> IROp -> Doc ann
-formatPrintOrRet dec v@(IRVar i _) = 
+formatPrintOrRet dec v@(IRBin i _ _ _) = 
   (pretty v) <> line 
     <> (pretty dec) 
       <+> (pretty i)
-formatPrintOrRet dec v@(IRConst i _) = 
+formatPrintOrRet dec v@(IRUn i _ _) = 
   (pretty v) <> line 
     <> (pretty dec) 
       <+> (pretty i)

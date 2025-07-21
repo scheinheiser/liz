@@ -30,7 +30,6 @@ data SemErr = IncorrectType LizPos LizPos Type Type -- expected type ; given typ
 data PError = FailedTypeInference T.Text
   | ReservedIdent T.Text
   | UnsupportedDeclaration T.Text
-  | InferredUndefined
   | InvalidNumber T.Text
   | TooManyExprsIf
   | WrongArgCount Int Int -- expected - got
@@ -41,7 +40,6 @@ instance ShowErrorComponent PError where
     ReservedIdent s ->          printf "[ERROR] Expected identifier, found keyword '%s'" (T.unpack s)
     FailedTypeInference s ->    printf "[ERROR] Failed to infer type of '%s'" (T.unpack s)
     UnsupportedDeclaration s -> printf "[ERROR] This type of declaration is currently not supported - '%s'" (T.unpack s)
-    InferredUndefined ->        printf "[ERROR] Can't infer the type of undefined."
     InvalidNumber s ->          printf "[ERROR] The format of this number '%s' is invalid." (T.unpack s)
     TooManyExprsIf ->           printf "[ERROR] There are too many expressions within this if statement."
     WrongArgCount ex got ->     printf "[ERROR] Expected %i arg(s), but got %i arg(s)." ex got

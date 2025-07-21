@@ -30,9 +30,6 @@ reservedIdent = customFailure . E.ReservedIdent
 unsupportedDeclaration :: T.Text -> Parser a
 unsupportedDeclaration = customFailure . E.UnsupportedDeclaration
 
-inferredUndefined :: Parser a
-inferredUndefined = customFailure E.InferredUndefined
-
 invalidNumber :: T.Text -> Parser a
 invalidNumber = customFailure . E.InvalidNumber
 
@@ -55,7 +52,7 @@ scn = L.space space1 (void $ spaceChar <|> tab) empty
 lizReserved :: [T.Text]
 lizReserved = 
   [ "var", "set", "const", "if", "def", "return", "False",
-    "True", "undefined", "not", "negate", "Int", "Float", 
+    "True", "not", "negate", "Int", "Float", 
     "String", "Char", "Bool", "Unit", "print", "block",
     "macro", "call-macro"]
 
@@ -81,7 +78,6 @@ parseValue = choice [
     SELiteral Char' <$> parseChar,
     parseNum, 
     SELiteral Bool' <$> parseBool,
-    SELiteral Undef' <$> parseUndefined,
     SELiteral Unit' <$> parseUnit
   ]
 
@@ -110,9 +106,6 @@ parseIdent shouldParseOp = do
 
 parseUnit :: Parser T.Text
 parseUnit = string "()"
-
-parseUndefined :: Parser T.Text
-parseUndefined = string "undefined"
 
 parseStr :: Parser T.Text
 parseStr = do

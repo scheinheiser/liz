@@ -51,13 +51,7 @@ head' = NE.head . NE.fromList
 
 -- if there's a 'none' value, then it must be a macro definition.
 hasMacroDef :: [Maybe L.SExpr] -> Bool
-hasMacroDef l = aux l /= 0
-  where
-    aux :: [Maybe L.SExpr] -> Int
-    aux [] = 0
-    aux (x : xs) =
-      if x == Nothing then 1 + aux xs
-                      else aux xs
+hasMacroDef = (0 /=) . length . filter (Nothing ==)
 
 subBody :: [L.SExpr] -> MacroTbl -> [Either [E.SemErr] (Maybe L.SExpr)]
 subBody exprs t = reverse $ aux exprs t
@@ -346,7 +340,7 @@ inferVariable s e L.Var{..} env isConst =
     aux :: T.Text -> L.Type -> L.Type -> Env -> (Either [E.SemErr] L.Type, Env)
     aux ident decType valType t@(Env {envVars=varMap, envConsts=constMap, envFuncs=funcMap})
       | ident `M.member` varMap || ident `M.member` constMap || ident `M.member` funcMap = (Left $ [E.IdentifierAlreadyInUse s e ident], env)
-      | valType /= decType && valType /= L.Undef' = 
+      | valType /= decType = 
         let newenv = M.insert ident varType -- so that you don't get a bunch of undefined variable errors.
         in if isConst then (Left $ [E.IncorrectType s e decType valType], t{envConsts=newenv constMap})
                       else (Left $ [E.IncorrectType s e decType valType], t{envVars=newenv varMap})
@@ -370,9 +364,6 @@ inferSet s end ident v env =
         case value of
           Nothing -> (Left $ [E.UndefinedIdentifier s end i], e)
           Just correctType | correctType == ty -> (Right ty, e)
-                           | correctType == L.Undef' ->
-                             -- TODO: change this to give a warning.
-                             let env'Vars = M.insert i ty envVars in (Right ty, e{envVars=env'Vars})
                            | otherwise -> (Left $ [E.IncorrectType s end correctType ty], e)
 
 inferFunc :: L.Func -> Env -> (Either [E.SemErr] L.Type, Env)
@@ -381,7 +372,7 @@ inferFunc (L.Func{..}) env@(Env{..})
   | otherwise =
     let
       argTypeErrs = 
-        lefts $ foldMap (\L.Arg{..} -> if argType == L.Undef' || argType == L.Unit' then [Left (E.InvalidArgType funcStart funcEnd argIdent argType)] else [Right ()]) funcArgs
+        lefts $ foldMap (\L.Arg{..} -> if argType == L.Unit' then [Left (E.InvalidArgType funcStart funcEnd argIdent argType)] else [Right ()]) funcArgs
       envWithArgs = flip addArgs env $ map (\L.Arg{..} -> (argIdent, argType)) funcArgs
       result = inferBody funcBody envWithArgs
       errsAndTypes = collectErrors result [] []

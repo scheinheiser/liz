@@ -29,9 +29,6 @@ spec = do
     it "parse a bool" $ do
       parse P.parseBool "" "True" `shouldParse` "True"
 
-    it "parse undefined" $ do
-      parse P.parseUndefined "" "undefined" `shouldParse` "undefined"
-
   describe "Variable declaration parsing" $ do
     describe "All type declarations" $ do
       it "parse a string" $ do
@@ -76,13 +73,6 @@ spec = do
           varValue = L.SELiteral L.Unit' "()" (mkPos 1, mkPos 19) (mkPos 1, mkPos 21)
         })
 
-      it "parse an undefined value" $ do
-        parse P.parseSExpr "" "(const this_is_undefined Int undefined)" `shouldParse` (L.SEConst base (mkPos 1, mkPos 39) L.Var{
-          varIdent = "this_is_undefined",
-          varType = L.Int',
-          varValue = L.SELiteral L.Undef' "undefined" (mkPos 1, mkPos 30) (mkPos 1, mkPos 39)
-        })
-
     describe "Explicit and implicit declaration" $ do
       it "parse a variable with explicit typing" $ do
         parse P.parseSExpr "" "(var hello String \"World\")" `shouldParse` (L.SEVar base (mkPos 1, mkPos 26) L.Var{
@@ -107,10 +97,6 @@ spec = do
 
       it "parse a nested variable declaration and infer its type (should fail)" $ do
         parse P.parseSExpr "" `shouldFailOn` "(var hello_world (+ 5 6))" 
-
-      it "parse an undefined variable declaration and infer its type" $ do
-        -- parse P.parseSExpr "" `shouldFailOn` "(const this_wont_work undefined)"
-        parse P.parseSExpr "" "(const inferred_undef undefined)" `shouldParse` L.SEConst (mkPos 1, mkPos 2) (mkPos 1, mkPos 32) (L.Var {varIdent = "inferred_undef", varType = L.Undef', varValue = L.SELiteral L.Undef' "undefined" (mkPos 1, mkPos 23) (mkPos 1, mkPos 32)})
 
   describe "Expression parsing" $ do
     describe "Function declarations" $ do

@@ -32,10 +32,45 @@ instance Pretty Val where
   pretty (Integ i) = viaShow i
   pretty (Flt i) = viaShow i
   pretty (Bln i) = viaShow i
-  pretty (Str i) = (pretty @T.Text "string[") <> pretty i <> rbracket
+  pretty (Str i) = (pretty @T.Text "string") <> lbracket <> (pretty i) <> rbracket
   pretty Unt = pretty @T.Text "()"
 
-data Fn = Fn T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
+data Expr = Bin T.Text L.BinaryOp Expr Expr
+  | Un T.Text L.UnaryOp Expr
+  | Ret Expr
+  | Print Expr
+  | Phi T.Text [(T.Text, Expr)] -- identifier - possible label names + their result
+  | Var T.Text Expr
+  | Const T.Text Expr
+  | FuncCall T.Text [Expr]
+  | Ident T.Text
+  deriving Show
+
+instance Pretty Expr where
+  pretty (Ident i) = pretty @T.Text i
+  pretty (Bin i op l r) = formatBinary i op l r
+  pretty (Un i op v) = formatUnary i op v
+  pretty (Ret v) = formatPrintOrRet "ret" v
+  pretty (Print v) = formatPrintOrRet "print" v
+  pretty (Var i v) = formatVar "var" i v
+  pretty (Const i v) = formatVar "const" i v
+  pretty (Phi i branches) = 
+    (pretty @T.Text "var") <+> (pretty i)
+      <+> (pretty @T.Text "=") 
+        <+> (pretty @T.Text "phi") 
+          <+> (hsep . punctuate comma $ map (\(b, r) -> (pretty b) <+> (pretty r)) branches)
+  pretty (FuncCall i exprs) = 
+    (pretty @T.Text i) 
+      <> (parens . hsep . punctuate comma $ map pretty exprs)
+
+data CFlow = IfStmt Expr Goto (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
+  | Lbl Label
+
+instance Pretty CFlow where
+  pretty (IfStmt cond gotomain truebranch falsebranch) = formatIfStmt cond gotomain truebranch falsebranch
+  pretty (IRLabel lbl) = pretty lbl
+
+data Fn = Fn T.Text [L.Arg] [CFlow] L.Type -- identifier - exprs - return type
   deriving Show
 instance Pretty Fn where
   pretty (Fn i args body retTy) =
@@ -44,51 +79,21 @@ instance Pretty Fn where
         <> (pretty @T.Text ":") <> line 
           <> (indent 2 . vcat $ map pretty body)
 
-data IfSt = IfSt IROp Goto (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
-  deriving Show
-instance Pretty IfSt where
-  pretty (IfSt cond gotomain truebranch falsebranch) = formatIfStmt cond gotomain truebranch falsebranch
-
-type IRBlock = [IROp]
+type IRBlock = [CFlow]
 
 data IROp = IRValue Val
-  | IRIdent T.Text
-  | IRBin T.Text L.BinaryOp IROp IROp
-  | IRUn T.Text L.UnaryOp IROp
-  | IRRet IROp
-  | IRPrint IROp
-  | IRVar T.Text IROp
-  | IRConst T.Text IROp
+  | IRExpr Expr
   | IRFunc Fn
-  | IRFuncCall T.Text [IROp]
   | IRBlockStmt IRBlock
-  | IRPhi T.Text [(T.Text, IROp)] -- identifier - possible label names + their result
-  | IRIf IfSt
-  | IRLabel Label -- a wrapper around the label for the leader algorithm
+  | IRFlow CFlow
   | IRGoto Goto -- a wrapper around goto for control flow/leader algorithm
   deriving Show
 
 instance Pretty IROp where
   pretty (IRValue v) = pretty v
-  pretty (IRIdent i) = pretty @T.Text i
-  pretty (IRBin i op l r) = formatBinary i op l r
-  pretty (IRUn i op v) = formatUnary i op v
-  pretty (IRRet v) = formatPrintOrRet "ret" v
-  pretty (IRPrint v) = formatPrintOrRet "print" v
-  pretty (IRVar i v) = formatVar "var" i v
-  pretty (IRPhi i branches) = 
-    (pretty @T.Text "var") <+> (pretty i)
-      <+> (pretty @T.Text "=") 
-        <+> (pretty @T.Text "phi") 
-          <+> (hsep . punctuate comma $ map (\(b, r) -> (pretty b) <+> (pretty r)) branches)
-  pretty (IRConst i v) = formatVar "const" i v
   pretty (IRFunc fn) = pretty fn
-  pretty (IRIf ifstmt) = pretty ifstmt
-  pretty (IRLabel lbl) = pretty lbl
+  pretty (IRExpr ex) = pretty ex
   pretty (IRGoto name) = (pretty @T.Text "goto") <+> (pretty name)
-  pretty (IRFuncCall i exprs) = 
-    (pretty @T.Text i) 
-      <> (parens . hsep . punctuate comma $ map pretty exprs)
   pretty (IRBlockStmt exprs) = 
     (pretty @T.Text "block:") <> line <> (indent 2 . vcat $ map pretty exprs)
 

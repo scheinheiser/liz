@@ -153,11 +153,12 @@ analyseProgram (L.Program prog) =
 macroSub :: L.SExpr -> MacroTbl -> (Either [E.SemErr] (Maybe L.SExpr), MacroTbl)
 macroSub (L.SEMacroDef (L.Macro s e i expr)) tbl
             | i `M.member` tbl = (Left [E.IdentifierAlreadyInUse s e i], tbl)
-            | checkRecursiveDef expr i = (Left [E.RecursiveMacroDef s e i], tbl)
+            -- to stop knock-on undefined macro errors. since it just inserts the sexpr, there's no actual issue with infinite in the table.
+            | checkRecursiveDef expr i = let newMTbl = M.insert i expr tbl in (Left [E.RecursiveMacroDef s e i], newMTbl)
             | otherwise = let newMTbl = M.insert i expr tbl in (Right Nothing, newMTbl)
   where
     checkRecursiveDef :: L.SExpr -> T.Text -> Bool
-    checkRecursiveDef (L.SEMacroCall _ _ call_ident) def_ident = call_ident == def_ident
+    checkRecursiveDef (L.SEValueMacro call_ident _ _) def_ident = call_ident == def_ident
     checkRecursiveDef (L.SEFunc (L.Func _ _ _ _ _ exprs)) def_ident = 
       any (== True) (map (flip checkRecursiveDef def_ident) exprs)
     checkRecursiveDef (L.SEBlockStmt _ _ exprs) def_ident = 
@@ -171,7 +172,7 @@ macroSub (L.SEMacroDef (L.Macro s e i expr)) tbl
     checkRecursiveDef (L.SEConst _ _ (L.Var _ _ v)) def_ident = checkRecursiveDef v def_ident
     checkRecursiveDef (L.SESet _ _ _ v) def_ident = checkRecursiveDef v def_ident
     checkRecursiveDef _ _ = False
-macroSub (L.SEMacroCall s e i) tbl =
+macroSub (L.SEValueMacro i s e) tbl =
   let value = i `M.lookup` tbl in
   case value of
     Nothing -> (Left [E.UndefinedIdentifier s e i], tbl)

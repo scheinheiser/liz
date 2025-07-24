@@ -224,8 +224,8 @@ spec = do
               (mkPos 1, mkPos 29) 
               (L.SELiteral L.String' "explode" (mkPos 1, mkPos 20) (mkPos 1, mkPos 29)))))
       it "parse a macro call" $ do
-        let input = "(call-macro mymac)"
-        parse P.parseSExpr "" input `shouldParse` (L.SEMacroCall
-          (mkPos 1, mkPos 2)
-          (mkPos 1, mkPos 18)
-          "mymac")
+        let input = "%mymac"
+        parse P.parseNested "" input `shouldParse` (L.SEValueMacro
+          "mymac"
+          (mkPos 1, mkPos 1)
+          (mkPos 1, mkPos 7))

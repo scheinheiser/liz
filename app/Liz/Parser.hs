@@ -12,6 +12,7 @@ import Liz.Common.Types
 import Data.String (IsString (..))
 import Data.Char (isAlphaNum, isDigit, isPrint) 
 import Control.Monad (void, liftM)
+import Data.List (find)
 
 import Text.Megaparsec hiding (count)
 import Text.Megaparsec.Char
@@ -46,6 +47,9 @@ getCurrentPos = getSourcePos >>= \p -> pure (sourceLine p, sourceColumn p)
 head' :: [a] -> a
 head' = NE.head . NE.fromList
 
+last' :: [a] -> a
+last' = NE.last . NE.fromList
+
 scn :: Parser ()
 scn = L.space space1 (void $ spaceChar <|> tab) empty
 
@@ -54,7 +58,7 @@ lizReserved =
   [ "var", "set", "const", "if", "def", "return", "False",
     "True", "not", "negate", "Int", "Float", 
     "String", "Char", "Bool", "Unit", "print", "block",
-    "macro", "call-macro"]
+    "macro"]
 
 lizSymbols :: Parser Char
 lizSymbols = choice
@@ -78,7 +82,8 @@ parseValue = choice [
     SELiteral Char' <$> parseChar,
     parseNum, 
     SELiteral Bool' <$> parseBool,
-    SELiteral Unit' <$> parseUnit
+    SELiteral Unit' <$> parseUnit,
+    parseValueMacro
   ]
 
 parseNested :: Parser SExpr
@@ -141,6 +146,12 @@ parseNum = do
 parseBool :: Parser T.Text
 parseBool = string "True" <|> string "False"
 
+parseValueMacro :: Parser (LizPos -> LizPos -> SExpr)
+parseValueMacro = do
+  _ <- char '%'
+  i <- parseIdent False
+  pure $ SEValueMacro i
+
 parsePrint :: Parser SExpr
 parsePrint = do
   s <- getCurrentPos
@@ -170,14 +181,6 @@ parseMacroDef = do
   e <- getCurrentPos
   pure $ SEMacroDef $ Macro s e i v
 
-parseMacroCall :: Parser SExpr
-parseMacroCall = do
-  s <- getCurrentPos
-  _ <- string "call-macro"
-  hspace1
-  i <- parseIdent False
-  e <- getCurrentPos
-  pure $ SEMacroCall s e i
 
 parseComment :: Parser SExpr
 parseComment = do
@@ -257,7 +260,6 @@ parseFuncDecl = do
          ty <- parseType
          pure Arg {argIdent = ident, argType = ty}
 
--- NOTE: think about changing how this works someday, it feels a little hacky.
 parseFuncCall :: Parser SExpr
 parseFuncCall = do
   s <- getCurrentPos
@@ -265,19 +267,26 @@ parseFuncCall = do
   hspace1
   args <- parseCallArgs
   e <- getCurrentPos
-  case () of _
-              | ident `elem` binaryOp ->
-                if length args == 2 
-                then 
-                  let 
-                    l = head' args 
-                    r = NE.last . NE.fromList $ args
-                  in pure $ SEBinary (fromBinaryOp ident) s e l r
-                else wrongArgCount 2 (length args)
-              | ident `elem` unaryOp ->
-                if length args == 1 then let v = head' args in pure $ SEUnary (fromUnaryOp ident) s e v
-                                    else wrongArgCount 1 (length args)
-              | otherwise -> pure $ SEFuncCall s e ident args
+  let
+    binaryRes = find ((==) ident . fst) binaryOps
+    unaryRes = find ((==) ident . fst) unaryOps
+  -- NOTE: ugly but idk what to do ab it
+  case binaryRes of
+    Just op -> 
+        if length args == 2 
+        then 
+          let 
+            l = head' args 
+            r = last' args
+          in pure $ SEBinary (snd op) s e l r
+        else wrongArgCount 2 (length args)
+    Nothing ->
+      case unaryRes of
+        Just op ->
+          if length args == 1 
+          then let v = head' args in pure $ SEUnary (snd op) s e v
+          else wrongArgCount 1 (length args)
+        Nothing -> pure $ SEFuncCall s e ident args
   where
     parseCallArgs :: Parser [SExpr]
     parseCallArgs = parseNested `sepBy` char ' '
@@ -285,35 +294,23 @@ parseFuncCall = do
     parseOpId :: Parser T.Text
     parseOpId = liftM T.pack $ some lizSymbols
 
-    binaryOp :: [T.Text]
-    binaryOp = ["++", "==", "!=", "+", "-", "*", "/", ">=", "<=", ">", "<"]
+    binaryOps :: [(T.Text, BinaryOp)]
+    binaryOps = [
+      ("++", Concat),
+      ("==", Eql),
+      ("!=", NotEql),
+      ("+", Add),
+      ("-", Subtract),
+      ("*", Multiply),
+      ("/", Divide),
+      (">=", GreaterEql),
+      ("<=", LessEql),
+      (">", Greater),
+      ("<", Less)
+      ]
 
-    unaryOp :: [T.Text]
-    unaryOp = ["not", "negate"]
-
-    -- TODO: change the ways these work, I don't like the exceptions.
-    fromBinaryOp :: T.Text -> BinaryOp
-    fromBinaryOp op =
-      case op of
-        "++" -> Concat
-        "==" -> Eql
-        "!=" -> NotEql
-        "+" -> Add
-        "-" -> Subtract
-        "*" -> Multiply
-        "/" -> Divide
-        ">=" -> GreaterEql
-        "<=" -> LessEql
-        ">" -> Greater
-        "<" -> Less
-        _ -> error "Reached unreachable in fromBinaryOp"
-
-    fromUnaryOp :: T.Text -> UnaryOp
-    fromUnaryOp op =
-      case op of
-        "not" -> Not
-        "negate" -> Negate
-        _ -> error "Reached unreachable in fromUnaryOp"
+    unaryOps :: [(T.Text, UnaryOp)]
+    unaryOps = [("not", Not), ("negate", Negate)]
 
 parseBlock :: Parser SExpr
 parseBlock = do
@@ -324,7 +321,6 @@ parseBlock = do
   e <- getCurrentPos
   pure $ SEBlockStmt s e block
 
--- TODO: fix errors here (mainly with empty ifs)
 parseIfStmt :: Parser SExpr
 parseIfStmt = do
   s <- getCurrentPos
@@ -340,7 +336,7 @@ parseIfStmt = do
               | otherwise ->
                 let 
                   truebr = head' block 
-                  falsebr = NE.last . NE.fromList $ block
+                  falsebr = last' block
                 in
                 pure $ SEIfStmt s e cond truebr (Just falsebr)
 
@@ -354,7 +350,6 @@ parseSExpr = (between (char '(') (char ')') $
             , parseRet
             , parsePrint
             , parseMacroDef
-            , parseMacroCall
             , parseBlock
             , parseFuncCall
             ])) <|> parseComment

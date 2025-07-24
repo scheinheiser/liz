@@ -22,7 +22,7 @@
 (def do_nothing [] > Unit
  (return ()))
 
-; (macro *ident* *expr/value*)
+; (value_macro *ident* *expr/value*)
 ; the code within the macro is substituted at call sites before semantic analysis.
 (macro hello-world "hello world!")
 (macro block_expr (block
@@ -45,7 +45,7 @@
   ; (block
   ;   (print "within a block!"))
 
-  (print (call-macro hello-world))
+  (print hello-world!)
   ; expands to:
   ; (print "hello world!")
 
@@ -55,7 +55,7 @@
   (if True
     (print "got true"))
 
-  (if (call-macro f)
+  (if f!
     (print "this won't be run")
     (print "this will be run"))
 

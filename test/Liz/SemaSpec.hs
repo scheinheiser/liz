@@ -447,35 +447,35 @@ spec = do
           let input = """
             (def main [] > Unit 
             \&  (macro hello-world "hello world!")
-            \&  (print (call-macro hello-world)))\
+            \&  (print %hello-world))\
           \"""
           let parsed = P.parseFile "" input
           let output = getOutput parsed
-          (S.analyseProgram output) `shouldBe` (Left [E.NonGlblMacroDef (mkPos 1, mkPos 2) (mkPos 3, mkPos 35)])
+          (S.analyseProgram output) `shouldBe` (Left [E.NonGlblMacroDef (mkPos 1, mkPos 2) (mkPos 3, mkPos 23)])
         it "Fail checking a recursive macro definition." $ do
           let input = """
             (macro hello-world (block 
             \&  (print "hello, world!")
-            \&  (call-macro hello-world)))
+            \&  (return %hello-world)))
             (def main [] > Unit 
-            \&  (call-macro hello-world))\
+            \&  (return %hello-world))\
           \"""
           let parsed = P.parseFile "" input
           let output = getOutput parsed
-          (S.analyseProgram output) `shouldBe` (Left [E.RecursiveMacroDef (mkPos 1, mkPos 2) (mkPos 3, mkPos 28) "hello-world", E.UndefinedIdentifier (mkPos 5, mkPos 4) (mkPos 5, mkPos 26) "hello-world"])
+          (S.analyseProgram output) `shouldBe` (Left [E.RecursiveMacroDef (mkPos 1, mkPos 2) (mkPos 3, mkPos 25) "hello-world"])
         it "Check a program with an expanded macro." $ do
           let input = """
             (macro hello-world "hello world!")
             (def main [] > Unit 
-            \&  (print (call-macro hello-world)))\
+            \&  (print %hello-world))\
           \"""
           let parsed = P.parseFile "" input
           let output = getOutput parsed
           (S.analyseProgram output) `shouldBe` (Right $ L.Program [L.SEFunc $ L.Func {
               funcIdent = "main",
               funcStart = (mkPos 2, mkPos 2),
-              funcEnd = (mkPos 3, mkPos 35),
+              funcEnd = (mkPos 3, mkPos 23),
               funcArgs = [],
               funcReturnType = L.Unit',
-              funcBody = [(L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 34) $ L.SELiteral L.String' "hello world!" (mkPos 1, mkPos 20) (mkPos 1, mkPos 34))]
+              funcBody = [(L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 22) $ L.SELiteral L.String' "hello world!" (mkPos 1, mkPos 20) (mkPos 1, mkPos 34))]
             }])

@@ -82,21 +82,24 @@ type LizPos = (Pos, Pos)
 newtype Program = Program [SExpr]
   deriving (Show, Eq)
 
-data SExpr = SEIdentifier T.Text LizPos LizPos
-  | SELiteral   Type T.Text LizPos LizPos
-  | SEComment
+data Expression = EVar LizPos LizPos Var
+  | EConst     LizPos LizPos Var
+  | ESet       LizPos LizPos T.Text SExpr -- ident - value
+  | EBinary    BinaryOp LizPos LizPos SExpr SExpr
+  | EUnary     UnaryOp LizPos LizPos SExpr
+  | EReturn    LizPos LizPos SExpr
+  | EPrint     LizPos LizPos SExpr
+  | EFuncCall  LizPos LizPos T.Text [SExpr] -- ident - values
+  | ELiteral  Type T.Text LizPos LizPos
+  | EIdentifier T.Text LizPos LizPos
+  | EValueMacro T.Text LizPos LizPos
+  deriving (Show, Eq)
+
+data SExpr = SEComment
+  | SEExpr      Expression
   | SEFunc      Func
   | SEMacroDef  Macro
-  | SEFuncCall  LizPos LizPos T.Text [SExpr] -- ident - values
-  | SEMacroCall LizPos LizPos T.Text
   | SEBlockStmt LizPos LizPos [SExpr]
-  | SEIfStmt    LizPos LizPos SExpr SExpr (Maybe SExpr) -- cond - truebranch - optional falsebranch
-  | SEReturn    LizPos LizPos SExpr
-  | SEPrint     LizPos LizPos SExpr
+  | SEIfStmt    LizPos LizPos Expression SExpr (Maybe SExpr) -- cond - truebranch - optional falsebranch
   | SEType      Type
-  | SEVar       LizPos LizPos Var
-  | SEConst     LizPos LizPos Var
-  | SESet       LizPos LizPos T.Text SExpr -- ident - value
-  | SEBinary    BinaryOp LizPos LizPos SExpr SExpr
-  | SEUnary     UnaryOp LizPos LizPos SExpr
   deriving (Show, Eq)

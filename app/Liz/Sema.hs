@@ -28,6 +28,7 @@ type MacroTbl = M.Map T.Text L.SExpr
 mkEnv :: Env
 mkEnv = Env {envFuncs = M.empty, envVars = M.empty, envConsts = M.empty}
 
+-- TODO: refactor to use mapaccuml
 inferBody :: [L.SExpr] -> Env -> [Either [E.SemErr] L.Type]
 inferBody exprs e = reverse $ aux exprs e
   where
@@ -158,30 +159,26 @@ macroSub (L.SEMacroDef (L.Macro s e i expr)) tbl
             | otherwise = let newMTbl = M.insert i expr tbl in (Right Nothing, newMTbl)
   where
     checkRecursiveDef :: L.SExpr -> T.Text -> Bool
-    checkRecursiveDef (L.SEValueMacro call_ident _ _) def_ident = call_ident == def_ident
     checkRecursiveDef (L.SEFunc (L.Func _ _ _ _ _ exprs)) def_ident = 
       any (== True) (map (flip checkRecursiveDef def_ident) exprs)
     checkRecursiveDef (L.SEBlockStmt _ _ exprs) def_ident = 
       any (== True) (map (flip checkRecursiveDef def_ident) exprs)
-    checkRecursiveDef (L.SEFuncCall _ _ _ params) def_ident = any (== True) (map (flip checkRecursiveDef def_ident) params)
-    checkRecursiveDef (L.SEReturn _ _ v) def_ident = checkRecursiveDef v def_ident
-    checkRecursiveDef (L.SEPrint _ _ v) def_ident = checkRecursiveDef v def_ident
-    checkRecursiveDef (L.SEBinary _ _ _ l r) def_ident = (checkRecursiveDef l def_ident) || (checkRecursiveDef r def_ident)
-    checkRecursiveDef (L.SEUnary _ _ _ v) def_ident = checkRecursiveDef v def_ident
-    checkRecursiveDef (L.SEVar _ _ (L.Var _ _ v)) def_ident = checkRecursiveDef v def_ident
-    checkRecursiveDef (L.SEConst _ _ (L.Var _ _ v)) def_ident = checkRecursiveDef v def_ident
-    checkRecursiveDef (L.SESet _ _ _ v) def_ident = checkRecursiveDef v def_ident
+    checkRecursiveDef (L.SEExpr (L.EValueMacro call_ident _ _)) def_ident = call_ident == def_ident
+    checkRecursiveDef (L.SEExpr (L.EFuncCall _ _ _ params)) def_ident = any (== True) (map (flip checkRecursiveDef def_ident) params)
+    checkRecursiveDef (L.SEExpr (L.EReturn _ _ v)) def_ident = checkRecursiveDef v def_ident
+    checkRecursiveDef (L.SEExpr (L.EPrint _ _ v)) def_ident = checkRecursiveDef v def_ident
+    checkRecursiveDef (L.SEExpr (L.EBinary _ _ _ l r)) def_ident = (checkRecursiveDef l def_ident) || (checkRecursiveDef r def_ident)
+    checkRecursiveDef (L.SEExpr (L.EUnary _ _ _ v)) def_ident = checkRecursiveDef v def_ident
+    checkRecursiveDef (L.SEExpr (L.EVar _ _ (L.Var _ _ v))) def_ident = checkRecursiveDef v def_ident
+    checkRecursiveDef (L.SEExpr (L.EConst _ _ (L.Var _ _ v))) def_ident = checkRecursiveDef v def_ident
+    checkRecursiveDef (L.SEExpr (L.ESet _ _ _ v)) def_ident = checkRecursiveDef v def_ident
     checkRecursiveDef _ _ = False
-macroSub (L.SEValueMacro i s e) tbl =
-  let value = i `M.lookup` tbl in
-  case value of
-    Nothing -> (Left [E.UndefinedIdentifier s e i], tbl)
-    Just expr -> (Right (Just expr), tbl)
 macroSub (L.SEFunc f@(L.Func _ s e _ _ body)) tbl = multiSub (\x -> L.SEFunc $ f{L.funcBody = x}) (s, e) body tbl
+macroSub (L.SEExpr ex) tbl = macroSubExpr ex tbl
 macroSub (L.SEBlockStmt s e body) tbl = multiSub (L.SEBlockStmt s e) (s, e) body tbl
 macroSub (L.SEIfStmt s e cond branch Nothing) tbl =
   let
-    (subbed_cond, _) = macroSub cond tbl
+    (subbed_cond, _) = macroSubExpr cond tbl
     (subbed_branch, _) = macroSub branch tbl
     (cond_err, subbed_cond') = collectErrors [subbed_cond] [] []
     (branch_err, subbed_branch') = collectErrors [subbed_branch] [] []
@@ -192,13 +189,13 @@ macroSub (L.SEIfStmt s e cond branch Nothing) tbl =
               | length branch_err /= 0 -> (Left branch_err, tbl)
               | otherwise ->
                 let
-                  filtered_cond = head' $ catMaybes subbed_cond'
+                  (L.SEExpr filtered_cond) = head' $ catMaybes subbed_cond'
                   filtered_branch = head' $ catMaybes subbed_branch'
                   expr = L.SEIfStmt s e filtered_cond filtered_branch Nothing
                 in (Right $ Just expr, tbl)
 macroSub (L.SEIfStmt s e cond tbranch (Just fbranch)) tbl =
   let
-    (subbed_cond, _) = macroSub cond tbl
+    (subbed_cond, _) = macroSubExpr cond tbl
     (subbed_tbranch, _) = macroSub tbranch tbl
     (subbed_fbranch, _) = macroSub fbranch tbl
     (cond_err, subbed_cond') = collectErrors [subbed_cond] [] []
@@ -223,15 +220,23 @@ macroSub (L.SEIfStmt s e cond tbranch (Just fbranch)) tbl =
                   || hasMacroDef subbed_fbranch' -> (Left [E.NonGlblMacroDef s e], tbl)
               | otherwise ->
                 let
-                  filtered_cond = head' $ catMaybes subbed_cond'
+                  (L.SEExpr filtered_cond) = head' $ catMaybes subbed_cond'
                   filtered_tbranch = head' $ catMaybes subbed_tbranch'
                   filtered_fbranch = head' $ catMaybes subbed_fbranch'
                   expr = L.SEIfStmt s e filtered_cond filtered_tbranch (Just filtered_fbranch)
                 in (Right $ Just expr, tbl)
-macroSub (L.SEFuncCall s e i params) tbl = multiSub (L.SEFuncCall s e i) (s, e) params tbl
-macroSub (L.SEPrint s e v) tbl = simpleSub (L.SEPrint s e) (s, e) v tbl
-macroSub (L.SEReturn s e v) tbl = simpleSub (L.SEReturn s e) (s, e) v tbl
-macroSub (L.SEBinary op s e l r) tbl =
+macroSub v tbl = (Right $ Just v, tbl)
+
+macroSubExpr :: L.Expression -> MacroTbl -> (Either [E.SemErr] (Maybe L.SExpr), MacroTbl)
+macroSubExpr (L.EFuncCall s e i params) tbl = multiSub (L.SEExpr . L.EFuncCall s e i) (s, e) params tbl
+macroSubExpr (L.EPrint s e v) tbl = simpleSub (L.SEExpr . L.EPrint s e) (s, e) v tbl
+macroSubExpr (L.EReturn s e v) tbl = simpleSub (L.SEExpr . L.EReturn s e) (s, e) v tbl
+macroSubExpr (L.EValueMacro i s e) tbl =
+  let value = i `M.lookup` tbl in
+  case value of
+    Nothing -> (Left [E.UndefinedIdentifier s e i], tbl)
+    Just expr -> (Right (Just expr), tbl)
+macroSubExpr (L.EBinary op s e l r) tbl =
   let
     (subbed_left, _) = macroSub l tbl
     (subbed_right, _) = macroSub r tbl
@@ -249,31 +254,34 @@ macroSub (L.SEBinary op s e l r) tbl =
                 let 
                   filtered_left = head' $ catMaybes subbed_left'
                   filtered_right = head' $ catMaybes subbed_right'
-                  expr = L.SEBinary op s e filtered_left filtered_right
+                  expr = L.SEExpr $ L.EBinary op s e filtered_left filtered_right
                 in (Right $ Just expr, tbl)
-macroSub (L.SEUnary op s e v) tbl = simpleSub (L.SEUnary op s e) (s, e) v tbl
-macroSub (L.SEVar s e (L.Var i t v)) tbl = simpleSub (\x -> L.SEVar s e (L.Var i t x)) (s, e) v tbl
-macroSub (L.SEConst s e (L.Var i t v)) tbl = simpleSub (\x -> L.SEConst s e (L.Var i t x)) (s, e) v tbl
-macroSub (L.SESet s e i v) tbl = simpleSub (L.SESet s e i) (s, e) v tbl
-macroSub v tbl = (Right $ Just v, tbl)
+macroSubExpr (L.EUnary op s e v) tbl = simpleSub (L.SEExpr . L.EUnary op s e) (s, e) v tbl
+macroSubExpr (L.EVar s e (L.Var i t v)) tbl = simpleSub (\x -> L.SEExpr $ L.EVar s e (L.Var i t x)) (s, e) v tbl
+macroSubExpr (L.EConst s e (L.Var i t v)) tbl = simpleSub (\x -> L.SEExpr $ L.EConst s e (L.Var i t x)) (s, e) v tbl
+macroSubExpr (L.ESet s e i v) tbl = simpleSub (L.SEExpr . L.ESet s e i) (s, e) v tbl
+macroSubExpr v tbl = (Right $ Just $ L.SEExpr v, tbl)
 
 -- main typechecking/sema functions.
 infer :: L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
-infer (L.SEIdentifier iden s e) env = inferIdentifier s e iden env
-infer (L.SELiteral ty _ _ _) env = (Right ty, env)
-infer (L.SEUnary op s e v) env = checkUnary s e op v env
-infer (L.SEBinary op s e l r) env = checkBinary s e op l r env
-infer (L.SEVar s e v) env = inferVariable s e v env False
-infer (L.SEConst s e v) env = inferVariable s e v env True
-infer (L.SESet s e i v) env = inferSet s e i v env
-infer (L.SEReturn _ _ v) env = infer v env
-infer (L.SEPrint _ _ _) env = (Right L.Unit', env)
+infer (L.SEExpr ex) env = inferExpr ex env
 infer (L.SEFunc f) env = inferFunc f env
 infer (L.SEBlockStmt _ _ body) env = inferBlock body env
-infer (L.SEFuncCall s e iden args) env = inferFuncCall s e iden args env
 infer (L.SEIfStmt s e cond tbr fbr) env = inferIfStmt s e cond tbr fbr env
 infer L.SEComment env = (Right L.String', env)
 infer s env = (Left [E.NotImplemented s], env)
+
+inferExpr :: L.Expression -> Env -> (Either [E.SemErr] L.Type, Env)
+inferExpr (L.ELiteral ty _ _ _) env = (Right ty, env)
+inferExpr (L.EUnary op s e v) env = checkUnary s e op v env
+inferExpr (L.EBinary op s e l r) env = checkBinary s e op l r env
+inferExpr (L.EVar s e v) env = inferVariable s e v env False
+inferExpr (L.EConst s e v) env = inferVariable s e v env True
+inferExpr (L.ESet s e i v) env = inferSet s e i v env
+inferExpr (L.EReturn _ _ v) env = infer v env
+inferExpr (L.EPrint _ _ _) env = (Right L.Unit', env)
+inferExpr (L.EFuncCall s e iden args) env = inferFuncCall s e iden args env
+inferExpr (L.EIdentifier iden s e) env = inferIdentifier s e iden env
 
 inferIdentifier :: L.LizPos -> L.LizPos -> T.Text -> Env -> (Either [E.SemErr] L.Type, Env)
 inferIdentifier s e iden env@(Env {envFuncs=fenv, envVars=venv, envConsts=cenv}) =
@@ -432,16 +440,16 @@ inferFuncCall s e ident sexprs env@(Env{..})
     findWrongTypes (x : xs) ys | not $ x `elem` ys = x : findWrongTypes xs ys
                                | otherwise = findWrongTypes xs ys
 
-inferIfStmt :: L.LizPos -> L.LizPos -> L.SExpr -> L.SExpr -> Maybe L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
+inferIfStmt :: L.LizPos -> L.LizPos -> L.Expression -> L.SExpr -> Maybe L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
 inferIfStmt s e cond tbranch Nothing env =
-  case (infer cond env, infer tbranch env) of
+  case (inferExpr cond env, infer tbranch env) of
     ((Left ecs, _), (Left ets, env')) -> (Left $ ecs <> ets, env')
     (err@((Left _), _), _) -> err
     (_, err@(Left _, _)) -> err
     ((Right tccond, _), (Right tctbr, env')) | tccond /= L.Bool' -> (Left [E.IncorrectType s e L.Bool' tccond], env')
                                              | otherwise -> (Right tctbr, env')
 inferIfStmt s e cond tbranch (Just fbranch) env =
-  case (infer cond env, infer tbranch env, infer fbranch env) of
+  case (inferExpr cond env, infer tbranch env, infer fbranch env) of
     ((Left ecs, _), (Left ets, _), (Left efs, env')) -> (Left $ ecs <> ets <> efs, env')
     (err@((Left _), _), _, _) -> err
     (_, err@(Left _, _), _) -> err

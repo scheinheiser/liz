@@ -477,5 +477,5 @@ spec = do
               funcEnd = (mkPos 3, mkPos 23),
               funcArgs = [],
               funcReturnType = L.Unit',
-              funcBody = [(L.SEPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 22) $ L.SELiteral L.String' "hello world!" (mkPos 1, mkPos 20) (mkPos 1, mkPos 34))]
+              funcBody = [(L.SEExpr $ L.EPrint (mkPos 3, mkPos 4) (mkPos 3, mkPos 22) $ L.SEExpr $ L.ELiteral L.String' "hello world!" (mkPos 1, mkPos 20) (mkPos 1, mkPos 34))]
             }])

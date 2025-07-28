@@ -320,7 +320,10 @@ parseFuncCall = do
       ]
 
     unaryOps :: [(T.Text, UnaryOp)]
-    unaryOps = [("not", Not), ("negate", Negate)]
+    unaryOps = [
+        ("not", Not), 
+        ("negate", Negate)
+      ]
 
 parseBlock :: Parser SExpr
 parseBlock = do

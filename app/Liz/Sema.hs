@@ -87,11 +87,11 @@ multiSub dec (s, e) body tbl =
                 let filtered_body = dec $ catMaybes subbed_body' in
                 (Right $ Just filtered_body, tbl)
 
-analyseAndPrintErrs :: L.Program -> FilePath -> IO ()
-analyseAndPrintErrs (L.Program prog) f = do
+analyseAndPrintErrs :: L.Program -> FilePath -> String -> IO ()
+analyseAndPrintErrs (L.Program prog) f ftext = do
   let (prog_errs, subbed_prog) = collectErrors (subBody prog mkMacroTbl) [] [] in
     if length prog_errs /= 0 
-    then Log.printErrs f prog_errs []
+    then Log.printErrs f ftext prog_errs []
     else 
       let
         subbed_prog' = catMaybes subbed_prog
@@ -99,11 +99,11 @@ analyseAndPrintErrs (L.Program prog) f = do
         errs = fold $ lefts res
       in
       case () of _
-                  | length errs /= 0 && hasMain > 1 -> Log.printErrs f (E.MultipleEntrypoints : errs) []
-                  | length errs /= 0 && hasMain == 0 -> Log.printErrs f (E.NoEntrypoint : errs) []
-                  | length errs /= 0 -> Log.printErrs f errs []
-                  | hasMain == 0 -> Log.printErrs f [E.NoEntrypoint] []
-                  | hasMain > 1 -> Log.printErrs f [E.MultipleEntrypoints] []
+                  | length errs /= 0 && hasMain > 1 -> Log.printErrs f ftext (E.MultipleEntrypoints : errs) []
+                  | length errs /= 0 && hasMain == 0 -> Log.printErrs f ftext (E.NoEntrypoint : errs) []
+                  | length errs /= 0 -> Log.printErrs f ftext errs []
+                  | hasMain == 0 -> Log.printErrs f ftext [E.NoEntrypoint] []
+                  | hasMain > 1 -> Log.printErrs f ftext [E.MultipleEntrypoints] []
                   | otherwise -> putStrLn "all good"
   where
     aux :: [L.SExpr] -> Env -> Int -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Int)
@@ -154,7 +154,7 @@ analyseProgram (L.Program prog) =
 macroSub :: L.SExpr -> MacroTbl -> (Either [E.SemErr] (Maybe L.SExpr), MacroTbl)
 macroSub (L.SEMacroDef (L.Macro s e i expr)) tbl
             | i `M.member` tbl = (Left [E.IdentifierAlreadyInUse s e i], tbl)
-            -- to stop knock-on undefined macro errors. since it just inserts the sexpr, there's no actual issue with infinite in the table.
+            -- to stop knock-on undefined macro errors. since it just inserts the sexpr, there's no actual issue with infinite expansion in the table.
             | checkRecursiveDef expr i = let newMTbl = M.insert i expr tbl in (Left [E.RecursiveMacroDef s e i], newMTbl)
             | otherwise = let newMTbl = M.insert i expr tbl in (Right Nothing, newMTbl)
   where

@@ -55,7 +55,7 @@ fromSExpr (L.SEIfStmt _ _ cond tbranch (Just fbranch)) i at =
   in (IRFlow $ IfStmt cond' gotomain (label, Label (label, [tbr'])) (Just (label, Label (label, [fbr']))), i''' + 1, at''')
 fromSExpr (L.SEBlockStmt _ _ vals) i at =
   let (ebody, i', at') = translateBody vals i at in
-  (IRBlockStmt $ reverse ebody, i', at')
+  (IRFlow $ BlockStmt $ reverse ebody, i', at')
 fromSExpr (L.SEFunc L.Func{funcIdent=ident, funcArgs=args, funcReturnType=ret, funcBody=body}) i at =
   let (tbody, i', at') = translateBody body i at in (IRFunc $ Fn ident args tbody ret, i', at')
 fromSExpr v _ _ = error (show v)
@@ -149,7 +149,7 @@ applyLabels prog i = aux prog (Label ((labelSuffix i), [])) [] i
       in if length label_exprs == 0 then aux rest (Label (labelSuffix $ idx + 3, [])) (labelled_if : acc) (idx + 3)
          else aux rest (Label (labelSuffix $ idx + 3, [])) (labelled_if : (IRFlow $ Lbl old_lbl) : acc) (idx + 3)
 
-    aux (goto@(IRGoto _) : rest) old_lbl@(Label (_, exprs)) acc idx = 
+    aux (goto@(IRFlow (CGoto _)) : rest) old_lbl@(Label (_, exprs)) acc idx = 
       if length exprs == 0 then aux rest (Label (labelSuffix $ idx + 1, [])) (goto : acc) (idx + 1)
                            else aux rest (Label (labelSuffix $ idx + 1, [])) (goto : (IRFlow $ Lbl old_lbl) : acc) (idx + 1)
     aux (expr : rest) curr_lbl acc idx = aux rest (pushExpr curr_lbl expr) acc idx
@@ -164,37 +164,38 @@ patchJumps = aux . NE.toList
       let 
         lastE = getLast $ last exprs
         endlbl = IRFlow $ Lbl $ Label ("end", [IRExpr $ Phi "res" [(gototrue, lastE)]])
-        patched_exprs = exprs <> [IRGoto "end"] 
+        patched_exprs = exprs <> [IRFlow $ CGoto "end"] 
       in
       IRFlow (IfStmt cond "end" (gototrue, Label (gototrue, patched_exprs)) Nothing) : endlbl : []
     aux [(IRFlow (IfStmt cond _ (gototrue, Label (_, texprs)) (Just (gotofalse, Label (_, fexprs)))))] =
       let 
         (lastT, lastF) = (getLast $ last texprs, getLast $ last fexprs)
         endlbl = IRFlow $ Lbl $ Label ("end", [(IRExpr $ Phi "res" [(gototrue, lastT), (gotofalse, lastF)]), (IRExpr $ Ret (IRExpr $ Ident "res"))])
-        patched_texprs = texprs <> [IRGoto "end"] 
-        patched_fexprs = fexprs <> [IRGoto "end"] 
+        patched_texprs = texprs <> [IRFlow $ CGoto "end"] 
+        patched_fexprs = fexprs <> [IRFlow $ CGoto "end"] 
       in
       IRFlow (IfStmt cond "end" (gototrue, Label (gototrue, patched_texprs)) (Just (gotofalse, Label (gotofalse, patched_fexprs)))) : endlbl : []
     aux ((IRFlow (IfStmt cond _ (gototrue, Label (_, exprs)) Nothing)) : next@(IRFlow (Lbl (Label (n, _)))) : rest) =
-      let patched_exprs = exprs <> [IRGoto n] in
+      let patched_exprs = exprs <> [IRFlow $ CGoto n] in
       IRFlow (IfStmt cond n (gototrue, Label (gototrue, patched_exprs)) Nothing) : next : (aux rest)
     aux ((IRFlow (IfStmt cond _ (gototrue, Label (_, texprs)) (Just (gotofalse, Label (_, fexprs))))) : next@(IRFlow (Lbl ((Label (n, _))))) : rest) =
       let 
-        patched_texprs = texprs <> [IRGoto n] 
-        patched_fexprs = fexprs <> [IRGoto n] 
+        patched_texprs = texprs <> [IRFlow $ CGoto n] 
+        patched_fexprs = fexprs <> [IRFlow $ CGoto n] 
       in
       IRFlow (IfStmt cond n (gototrue, Label (gototrue, patched_texprs)) (Just (gotofalse, Label (gotofalse, patched_fexprs)))) : next : (aux rest) 
     aux (IRFlow (Lbl (Label (n, exprs))) : rest) = 
       let patched_body = reverse $ aux exprs in IRFlow (Lbl (Label (n, patched_body))) : aux rest
-    aux (IRBlockStmt exprs : rest) = 
-      let patched_body = aux exprs in IRBlockStmt patched_body : aux rest
+    aux (IRFlow (BlockStmt exprs) : rest) = 
+      let patched_body = aux exprs in IRFlow (BlockStmt patched_body) : aux rest
     aux (IRFunc (Fn n args exprs ret) : rest) = 
       let patched_body = aux exprs in (IRFunc $ Fn n args patched_body ret) : aux rest
     aux (expr : rest) = expr : aux rest
 
     getLast :: IROp -> Expr
-    getLast (IRBlockStmt b) = getLast $ last b
-    getLast (IRExpr op@((Bin _ _ _ _);(Un _ _ _))) = op
+    getLast (IRFlow (BlockStmt b)) = getLast $ last b
+    getLast (IRExpr (Bin i _ _ _)) = Ident i
+    getLast (IRExpr (Un i _ _)) = Ident i
     getLast (IRExpr op@(FuncCall _ _)) = op
     getLast (IRExpr (Var i _)) = Ident i
     getLast (IRExpr ret@(Ret _)) = ret

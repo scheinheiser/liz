@@ -62,13 +62,20 @@ instance Pretty Expr where
       <> (parens . hsep . punctuate comma $ map pretty exprs)
   pretty (EVal v) = pretty v
 
+type IRBlock = [IROp]
+
 data CFlow = IfStmt Expr Goto (Goto, Label) (Maybe (Goto, Label)) -- cond - true branch - optional false branch
   | Lbl Label
+  | BlockStmt IRBlock
+  | CGoto Goto -- a wrapper around goto for control flow/leader algorithm
   deriving Show
 
 instance Pretty CFlow where
   pretty (IfStmt cond gotomain truebranch falsebranch) = formatIfStmt cond gotomain truebranch falsebranch
   pretty (Lbl lbl) = pretty lbl
+  pretty (BlockStmt exprs) =
+    (pretty @T.Text "block:") <> line <> (indent 2 . vcat $ map pretty exprs)
+  pretty (CGoto name) = (pretty @T.Text "goto") <+> (pretty name)
 
 data Fn = Fn T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
   deriving Show
@@ -79,24 +86,17 @@ instance Pretty Fn where
         <> (pretty @T.Text ":") <> line 
           <> (indent 2 . vcat $ map pretty body)
 
-type IRBlock = [IROp]
-
 data IROp = IRValue Val
   | IRExpr Expr
   | IRFunc Fn
-  | IRBlockStmt IRBlock
   | IRFlow CFlow
-  | IRGoto Goto -- a wrapper around goto for control flow/leader algorithm
   deriving Show
 
 instance Pretty IROp where
   pretty (IRValue v) = pretty v
   pretty (IRFunc fn) = pretty fn
   pretty (IRExpr ex) = pretty ex
-  pretty (IRGoto name) = (pretty @T.Text "goto") <+> (pretty name)
   pretty (IRFlow flow) = pretty flow
-  pretty (IRBlockStmt exprs) = 
-    (pretty @T.Text "block:") <> line <> (indent 2 . vcat $ map pretty exprs)
 
 -- helper pretty functions
 formatVar :: T.Text -> IROp -> Doc ann

@@ -22,11 +22,10 @@
 (def do_nothing [] > Unit
  (return ()))
 
-; (value_macro *ident* *expr/value*)
-; the code within the macro is substituted at call sites before semantic analysis.
+; (macro *ident* *expr/value*)
+; the code within the macro is substituted at the call site(s) before semantic analysis/type checking.
 (macro hello-world "hello world!")
-(macro block_expr (block
-  (print "within a block!")))
+(macro addition (+ 34 35))
 (macro f False)
 
 (def main [] > Unit
@@ -38,16 +37,15 @@
   (const pi 3.141592) ; inferred type
   (const tau Float 6.283185) ; explicit typing
 
-  ; (call-macro *ident*)
+  ; %*macro ident*
   ; expands the macro at the call site
-  (call-macro block_expr)
-  ; expands to: 
-  ; (block
-  ;   (print "within a block!"))
-
-  (print hello-world!)
+  (print %hello-world)
   ; expands to:
   ; (print "hello world!")
+
+  (print %addition)
+  ; expands to:
+  ; (print (+ 34 35))
 
   ; (if *cond*
   ;    *true expr*
@@ -55,7 +53,7 @@
   (if True
     (print "got true"))
 
-  (if f!
+  (if %f
     (print "this won't be run")
     (print "this will be run"))
 

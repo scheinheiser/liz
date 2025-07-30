@@ -18,7 +18,8 @@ executable liz
       , Liz.Common.Types
       , Liz.Common.Errors
       , Liz.Common.Logging
-      , Liz.Sema
+      , Liz.Sema.Sema
+      , Liz.Sema.Macro
       -- , Liz.Codegen
       , Liz.IR.IR
       , Liz.IR.IRTypes
@@ -42,7 +43,8 @@ test-suite liz-test
     default-language: GHC2024
     other-modules: Liz.Parser
       , Liz.ParserSpec
-      , Liz.Sema
+      , Liz.Sema.Sema
+      , Liz.Sema.Macro
       -- , Liz.Codegen
       , Liz.IR.IR
       , Liz.IR.IRTypes

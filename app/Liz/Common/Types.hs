@@ -1,11 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 
 module Liz.Common.Types where
 
 import qualified Data.Text as T
 import Prettyprinter (Pretty (..))
-import Text.Megaparsec (Pos)
 
 -- TODO: add support for specific integer/float sizes (i.e. i32, i64, f32, f64)
 data Type = Int'
@@ -56,8 +54,7 @@ data Arg = Arg
 
 data Func = Func 
   { funcIdent       :: T.Text
-  , funcStart       :: LizPos
-  , funcEnd         :: LizPos
+  , funcPos         :: LizRange
   , funcArgs        :: [Arg]
   , funcReturnType  :: Type
   , funcBody        :: [SExpr]
@@ -66,40 +63,43 @@ data Func = Func
 data Var = Var
   { varIdent    :: T.Text
   , varType     :: Type
-  , varValue    :: SExpr
+  , varValue    :: Expression
   } deriving (Show, Eq)
 
 -- TODO: expand the macro system to be able to pass in values, similar to Lisp macros
 data Macro = Macro
-  { macStart :: LizPos
-  , macEnd   :: LizPos
+  { macPos   :: LizRange
   , macIdent :: T.Text
-  , macValue :: SExpr
+  , macValue :: Expression
   } deriving (Show, Eq)
 
-type LizPos = (Pos, Pos)
-
+data LizRange = LizRange !Int !Int
+  deriving (Show, Eq)
+ 
 newtype Program = Program [SExpr]
   deriving (Show, Eq)
 
-data Expression = EVar LizPos LizPos Var
-  | EConst     LizPos LizPos Var
-  | ESet       LizPos LizPos T.Text SExpr -- ident - value
-  | EBinary    BinaryOp LizPos LizPos SExpr SExpr
-  | EUnary     UnaryOp LizPos LizPos SExpr
-  | EReturn    LizPos LizPos SExpr
-  | EPrint     LizPos LizPos SExpr
-  | EFuncCall  LizPos LizPos T.Text [SExpr] -- ident - values
-  | ELiteral  Type T.Text LizPos LizPos
-  | EIdentifier T.Text LizPos LizPos
-  | EValueMacro T.Text LizPos LizPos
+data Expression = EBinary BinaryOp LizRange Expression Expression
+  | EUnary      UnaryOp LizRange Expression
+  | EReturn     LizRange Expression
+  | EPrint      LizRange Expression
+  | EFuncCall   LizRange T.Text [Expression] -- ident - values
+  | ELiteral    Type T.Text LizRange
+  | EIdentifier T.Text LizRange
+  | EValueMacro T.Text LizRange
+  deriving (Show, Eq)
+
+data ControlFlow = FFunc Func
+  | FBlockStmt LizRange [SExpr]
+  | FIfStmt    LizRange Expression SExpr (Maybe SExpr) -- cond - truebranch - optional falsebranch
   deriving (Show, Eq)
 
 data SExpr = SEComment
   | SEExpr      Expression
-  | SEFunc      Func
+  | SEVar       LizRange Var
+  | SEConst     LizRange Var
+  | SESet       LizRange T.Text Expression
+  | SEFlow      ControlFlow
   | SEMacroDef  Macro
-  | SEBlockStmt LizPos LizPos [SExpr]
-  | SEIfStmt    LizPos LizPos Expression SExpr (Maybe SExpr) -- cond - truebranch - optional falsebranch
   | SEType      Type
   deriving (Show, Eq)

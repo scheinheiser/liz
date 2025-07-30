@@ -13,6 +13,7 @@ import Data.String (IsString (..))
 import Data.Char (isAlphaNum, isDigit, isPrint) 
 import Control.Monad (void, liftM)
 import Data.List (find)
+import Unsafe.Coerce (unsafeCoerce)
 
 import Text.Megaparsec hiding (count)
 import Text.Megaparsec.Char
@@ -41,8 +42,8 @@ wrongArgCount :: Int -> Int -> Parser a
 wrongArgCount ex got = customFailure $ E.WrongArgCount ex got
 
 -- helper parsing functions
-getCurrentPos :: Parser (Pos, Pos) 
-getCurrentPos = getSourcePos >>= \p -> pure (sourceLine p, sourceColumn p)
+getCurrentLine :: Parser Int
+getCurrentLine = getSourcePos >>= pure . unsafeCoerce . sourceLine
 
 head' :: [a] -> a
 head' = NE.head . NE.fromList
@@ -78,7 +79,7 @@ parseType =
 
 parseValue :: Parser Expression
 parseValue = do
-  s <- getCurrentPos
+  s <- getCurrentLine
   v <- choice [
       ELiteral String' <$> parseStr, 
       ELiteral Char' <$> parseChar,
@@ -87,8 +88,8 @@ parseValue = do
       ELiteral Unit' <$> parseUnit,
       EIdentifier <$> parseIdent False
     ]
-  e <- getCurrentPos
-  pure $ v s e
+  e <- getCurrentLine
+  pure $ v (LizRange s e)
 
 parseNested :: Parser SExpr
 parseNested = do
@@ -98,8 +99,6 @@ parseNested = do
 parseExpr :: Parser Expression
 parseExpr = parseValue <|> parseValueMacro <|> (between (char '(') (char ')') $ 
   choice [
-    parseVarDecl,
-    parseSetStmt,
     parseRet,
     parsePrint,
     parseFuncCall
@@ -134,12 +133,12 @@ parseStr = do
 
 parseChar :: Parser T.Text
 parseChar = do
-  _ <- char '\''
+  d1 <- char '\''
   c <- printChar
-  _ <- char '\''
-  pure $ T.pack [c]
+  d2 <- char '\''
+  pure $ T.pack [d1, c, d2]
 
-parseNum :: Parser (LizPos -> LizPos -> Expression)
+parseNum :: Parser (LizRange -> Expression)
 parseNum = do
   n <- (takeWhile1P @_ @T.Text (Just "digits 0-9 or '.'") valid) <* notFollowedBy letterChar
   case () of _
@@ -158,40 +157,40 @@ parseBool = string "True" <|> string "False"
 
 parseValueMacro :: Parser Expression
 parseValueMacro = do
-  s <- getCurrentPos
+  s <- getCurrentLine
   _ <- char '%'
   i <- parseIdent False
-  e <- getCurrentPos
-  pure $ EValueMacro i s e
+  e <- getCurrentLine
+  pure $ EValueMacro i (LizRange s e)
 
 parsePrint :: Parser Expression
 parsePrint = do
-  s <- getCurrentPos
+  s <- getCurrentLine
   _ <- string "print"
   hspace1
-  v <- parseNested
-  e <- getCurrentPos
-  pure $ EPrint s e v
+  v <- parseExpr
+  e <- getCurrentLine
+  pure $ EPrint (LizRange s e) v
 
 parseRet :: Parser Expression
 parseRet = do
-  s <- getCurrentPos
+  s <- getCurrentLine
   _ <- string "return"
   hspace1
-  v <- parseNested
-  e <- getCurrentPos
-  pure $ EReturn s e v
+  v <- parseExpr
+  e <- getCurrentLine
+  pure $ EReturn (LizRange s e) v
 
 parseMacroDef :: Parser SExpr
 parseMacroDef = do
-  s <- getCurrentPos
+  s <- getCurrentLine
   _ <- string "macro"
   hspace1
   i <- parseIdent False
   hspace1
-  v <- parseNested
-  e <- getCurrentPos
-  pure $ SEMacroDef $ Macro s e i v
+  v <- parseExpr
+  e <- getCurrentLine
+  pure $ SEMacroDef $ Macro (LizRange s e) i v
 
 parseComment :: Parser SExpr
 parseComment = do
@@ -202,40 +201,41 @@ parseComment = do
     valid :: Char -> Bool
     valid = liftA2 (||) isPrint ('\n' /=)
 
-parseVarDecl :: Parser Expression
+-- TODO: refactor parsing to remove the need for SEType.
+parseVarDecl :: Parser SExpr
 parseVarDecl = do
-  s <- getCurrentPos
-  decType <- EVar s <$ string "var" <|> EConst s <$ string "const"
+  s <- getCurrentLine
+  decType <- SEVar <$ string "var" <|> SEConst <$ string "const"
   hspace1
   ident <- parseIdent False
   hspace1 
-  ty <- (liftM SEType parseType) <|> parseNested
-  aux decType ident ty
+  ty <- (liftM SEType parseType) <|> (liftM SEExpr parseExpr)
+  aux decType s ident ty
   where
-    aux decl iden (SEType ty) = do
+    aux decl s iden (SEType ty) = do
       _ <- some hspace1
-      value <- L.lineFold scn $ \_ -> parseNested
-      e <- getCurrentPos
-      pure $ decl e Var{varIdent=iden, varType=ty, varValue=value}
-    aux decl iden lit@(SEExpr (ELiteral ty _ _ _)) = do
-      e <- getCurrentPos
-      pure $ decl e Var{varIdent=iden, varType=ty, varValue=lit}
-    aux _ _ op = unsupportedDeclaration $ T.show op
+      value <- L.lineFold scn $ \_ -> parseExpr
+      e <- getCurrentLine
+      pure $ decl (LizRange s e) Var{varIdent=iden, varType=ty, varValue=value}
+    aux decl s iden (SEExpr lit@(ELiteral ty _ _)) = do
+      e <- getCurrentLine
+      pure $ decl (LizRange s e) Var{varIdent=iden, varType=ty, varValue=lit}
+    aux _ _ _ op = unsupportedDeclaration $ T.show op
 
-parseSetStmt :: Parser Expression
+parseSetStmt :: Parser SExpr
 parseSetStmt = do
-  s <- getCurrentPos
+  s <- getCurrentLine
   _ <- string "set"
   hspace1
   ident <- parseIdent False
   hspace1
-  value <- parseNested
-  e <- getCurrentPos
-  pure $ ESet s e ident value
+  value <- parseExpr
+  e <- getCurrentLine
+  pure $ SESet (LizRange s e) ident value
 
 parseFuncDecl :: Parser SExpr
 parseFuncDecl = do
-   s <- getCurrentPos
+   s <- getCurrentLine
    _ <- string "def"
    hspace1
    ident <- (parseIdent False) <|> parseOpId
@@ -247,8 +247,8 @@ parseFuncDecl = do
    retTy <- parseType
 
    block <- some $ L.lineFold scn $ \_ -> parseSExpr
-   e <- getCurrentPos
-   pure $ SEFunc Func {funcIdent = ident, funcStart = s, funcEnd = e, funcArgs = args, funcReturnType = retTy, funcBody = block}
+   e <- getCurrentLine
+   pure $ SEFlow $ FFunc Func {funcIdent = ident, funcPos = LizRange s e, funcArgs = args, funcReturnType = retTy, funcBody = block}
    where
     parseOpId :: Parser T.Text
     parseOpId = do
@@ -273,11 +273,11 @@ parseFuncDecl = do
 
 parseFuncCall :: Parser Expression
 parseFuncCall = do
-  s <- getCurrentPos
+  s <- getCurrentLine
   ident <- (parseIdent True) <|> parseOpId
   hspace1
   args <- parseCallArgs
-  e <- getCurrentPos
+  e <- getCurrentLine
   let
     binaryRes = find ((==) ident . fst) binaryOps
     unaryRes = find ((==) ident . fst) unaryOps
@@ -288,18 +288,18 @@ parseFuncCall = do
           let 
             l = head' args 
             r = last' args
-          in pure $ EBinary (snd op) s e l r
+          in pure $ EBinary (snd op) (LizRange s e) l r
         else wrongArgCount 2 (length args)
     Nothing ->
       case unaryRes of
         Just op ->
           if length args == 1 
-          then pure $ EUnary (snd op) s e (head' args) 
+          then pure $ EUnary (snd op) (LizRange s e) (head' args) 
           else wrongArgCount 1 (length args)
-        Nothing -> pure $ EFuncCall s e ident args
+        Nothing -> pure $ EFuncCall (LizRange s e) ident args
   where
-    parseCallArgs :: Parser [SExpr]
-    parseCallArgs = parseNested `sepBy` char ' '
+    parseCallArgs :: Parser [Expression]
+    parseCallArgs = parseExpr `sepBy` char ' '
 
     parseOpId :: Parser T.Text
     parseOpId = liftM T.pack $ some lizSymbols
@@ -327,38 +327,38 @@ parseFuncCall = do
 
 parseBlock :: Parser SExpr
 parseBlock = do
-  s <- getCurrentPos
+  s <- getCurrentLine
   _ <- string "block"
   hspace
   block <- some $ L.lineFold scn $ \_ -> parseSExpr
-  e <- getCurrentPos
-  pure $ SEBlockStmt s e block
+  e <- getCurrentLine
+  pure $ SEFlow $ FBlockStmt (LizRange s e) block
 
 parseIfStmt :: Parser SExpr
 parseIfStmt = do
-  s <- getCurrentPos
+  s <- getCurrentLine
   _ <- string "if"
   hspace
   cond <- parseExpr
   hspace
   block <- some $ L.lineFold scn $ \_ -> parseNested <?> "if-sexpr branch"
-  e <- getCurrentPos
+  e <- getCurrentLine
   case () of _
               | length block > 2 -> tooManyExprsIf
-              | length block == 1 -> pure $ SEIfStmt s e cond (head' block) Nothing
+              | length block == 1 -> pure $ SEFlow $ FIfStmt (LizRange s e) cond (head' block) Nothing
               | otherwise ->
                 let 
                   truebr = head' block 
                   falsebr = last' block
                 in
-                pure $ SEIfStmt s e cond truebr (Just falsebr)
+                pure $ SEFlow $ FIfStmt (LizRange s e) cond truebr (Just falsebr)
 
 parseSExpr :: Parser SExpr
 parseSExpr = (between (char '(') (char ')') $ 
   label "valid S-Expression" 
     (choice [parseFuncDecl
-            , SEExpr <$> parseVarDecl
-            , SEExpr <$> parseSetStmt
+            , parseVarDecl
+            , parseSetStmt
             , parseIfStmt
             , SEExpr <$> parseRet
             , SEExpr <$> parsePrint
@@ -379,6 +379,6 @@ parseFile f fc = do
     removeComments :: [SExpr] -> [SExpr]
     removeComments [] = []
     removeComments (SEComment : rest) = removeComments rest
-    removeComments (SEFunc func@(Func{funcBody=body}) : rest) = SEFunc func{funcBody=filter (SEComment /=) body} : removeComments rest
-    removeComments (SEBlockStmt s e body : rest) = SEBlockStmt s e (filter (SEComment /=) body) : removeComments rest
+    removeComments (SEFlow (FFunc func@(Func{funcBody=body})) : rest) = (SEFlow $ FFunc func{funcBody=filter (SEComment /=) body}) : removeComments rest
+    removeComments (SEFlow (FBlockStmt r body) : rest) = (SEFlow $ FBlockStmt r (filter (SEComment /=) body)) : removeComments rest
     removeComments (expr : rest) = expr : removeComments rest

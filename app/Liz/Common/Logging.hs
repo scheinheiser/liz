@@ -6,24 +6,16 @@ import qualified Text.Colour as C
 import qualified Data.Text as T
 
 import Liz.Common.Errors
-import Liz.Common.Types (LizPos)
+import Liz.Common.Types (LizRange (..))
 
-import Text.Megaparsec (unPos)
 import Text.Printf (printf)
-import Data.List (intercalate, mapAccumL)
+import Data.List (intercalate)
 
-sliceFile :: String -> LizPos -> LizPos -> T.Text
-sliceFile ftext (sL, sC) (eL, eC) =
+sliceFile :: String -> LizRange -> T.Text
+sliceFile ftext (LizRange sL eL) =
   let 
-    (sL', sC', eL', eC') = (unPos sL - 1, unPos sC, unPos eL - 1, unPos eC)
-    modifyLine n l 
-      | n == sL' && n == eL' = drop sC' $ take eC' l
-      | n == sL' = drop sC' l
-      | n == eL' = take eC' l
-      | otherwise = l
-
-    (_, modifiedLines) = mapAccumL (\n l -> (n + 1, modifyLine n l)) 1 $ lines ftext
-    slicedFile = grabSlice 0 (\n -> n >= sL' && n <= eL') modifiedLines
+    (sL', eL') = (sL - 1, eL - 1)
+    slicedFile = grabSlice 0 (\n -> n >= sL' && n <= eL') $ lines ftext
     slicedFile' =
       if length slicedFile > 3 then (take 3 slicedFile) <> ["..."]
                                else slicedFile
@@ -37,44 +29,48 @@ sliceFile ftext (sL, sC) (eL, eC) =
 prettifyErr :: SemErr -> FilePath -> String -> [C.Chunk]
 prettifyErr expr fp ftext =
   case expr of
-    IncorrectType s e ex got -> formatError fp (Just (s, e)) (T.pack $ printf "Expected type '%s', but got '%s'." (show ex) (show got)) Nothing (Just $ sliceFile ftext s e)
-    IncorrectTypes s e ex got -> formatError fp (Just (s, e)) (T.pack $ printf "Expected types '%s', but got '%s'." ex (intercalate "," $ map show got)) Nothing (Just $ sliceFile ftext s e)
-    FailedLitInference s e lit -> formatError fp (Just (s, e)) (T.pack $ printf "Failed to infer the type of '%s'." lit) Nothing (Just $ sliceFile ftext s e)
-    UndefinedIdentifier s e i -> formatError fp (Just (s, e)) (T.pack $ printf "Undefined identifier '%s'." i) (Just "Consider checking that the value is in scope. If it is a macro, ensure that it has been defined before its usage.") (Just $ sliceFile ftext s e)
-    IdentifierAlreadyInUse s e i -> formatError fp (Just (s, e)) (T.pack $ printf "Identifier '%s' is already in use." i) (Just "Consider giving the identifier a different name.") (Just $ sliceFile ftext s e)
-    AssigningToConstant s e i -> formatError fp (Just (s, e)) (T.pack $ printf "Attempted to assign to constant '%s'." i) (Just "Consider defining the value with 'var' instead of 'const'.") (Just $ sliceFile ftext s e)
-    AssigningToFunction s e i -> formatError fp (Just (s, e)) (T.pack $ printf "Attempted to assign to the function '%s'." i) (Just $ T.pack $ printf "Did you mean to define '%s' as a function?" i) (Just $ sliceFile ftext s e)
-    NotEnoughArgs s e i no -> formatError fp (Just (s, e)) (T.pack $ printf "Not enough args supplied to '%s'." i) (Just $ T.pack $ printf "Missing %s args." (show no)) (Just $ sliceFile ftext s e)
-    TooManyArgs s e i no -> formatError fp (Just (s, e)) (T.pack $ printf "Too many args supplied to '%s'." i) (Just $ T.pack $ printf "Supplied an extra %s args." (show no)) (Just $ sliceFile ftext s e)
-    IncorrectArgTypes s e i ex got -> 
+    IncorrectType range ex got -> formatError fp (Just range) (T.pack $ printf "Expected type '%s', but got '%s'." (show ex) (show got)) Nothing (Just $ sliceFile ftext range)
+    IncorrectTypes range ex got -> formatError fp (Just range) (T.pack $ printf "Expected types '%s', but got '%s'." ex (intercalate "," $ map show got)) Nothing (Just $ sliceFile ftext range)
+    FailedLitInference range lit -> formatError fp (Just range) (T.pack $ printf "Failed to infer the type of '%s'." lit) Nothing (Just $ sliceFile ftext range)
+    UndefinedIdentifier range i -> formatError fp (Just range) (T.pack $ printf "Undefined identifier '%s'." i) (Just "Consider checking that the value is in scope. If it is a macro, ensure that it has been defined before its usage.") (Just $ sliceFile ftext range)
+    IdentifierAlreadyInUse range i -> formatError fp (Just range) (T.pack $ printf "Identifier '%s' is already in use." i) (Just "Consider giving the identifier a different name.") (Just $ sliceFile ftext range)
+    AssigningToConstant range i -> formatError fp (Just range) (T.pack $ printf "Attempted to assign to constant '%s'." i) (Just "Consider defining the value with 'var' instead of 'const'.") (Just $ sliceFile ftext range)
+    AssigningToFunction range i -> formatError fp (Just range) (T.pack $ printf "Attempted to assign to the function '%s'." i) (Just $ T.pack $ printf "Did you mean to define '%s' as a function?" i) (Just $ sliceFile ftext range)
+    NotEnoughArgs range i no -> formatError fp (Just range) (T.pack $ printf "Not enough args supplied to '%s'." i) (Just $ T.pack $ printf "Missing %s args." (show no)) (Just $ sliceFile ftext range)
+    TooManyArgs range i no -> formatError fp (Just range) (T.pack $ printf "Too many args supplied to '%s'." i) (Just $ T.pack $ printf "Supplied an extra %s args." (show no)) (Just $ sliceFile ftext range)
+    IncorrectArgTypes range i ex got -> 
       let
         formatted_rts = intercalate "," $ map show ex 
         formatted_wts = intercalate "," $ map show got
-      in formatError fp (Just (s, e)) (T.pack $ printf "While calling '%s', expectected args of type %s but got %s." i formatted_rts formatted_wts) Nothing (Just $ sliceFile ftext s e)
+      in formatError fp (Just range) (T.pack $ printf "While calling '%s', expectected args of type %s but got %s." i formatted_rts formatted_wts) Nothing (Just $ sliceFile ftext range)
     NoEntrypoint -> formatError fp Nothing ("Couldn't find entry point.") (Just "Consider adding a 'main' function.") Nothing
     MultipleEntrypoints -> formatError fp Nothing ("Multiple entry points in file.") (Just "Consider renaming one of them.") Nothing
     NotImplemented s -> formatError fp Nothing (T.pack $ printf "SExpression has not been implemented; '%s'." (show s)) Nothing Nothing
-    InvalidArgType s e i t -> formatError fp (Just (s, e)) (T.pack $ printf "Invalid type has been given to function argument '%s' - '%s'." i (show t)) (Just "An undefined/unit type arg is disallowed.") (Just $ sliceFile ftext s e)
-    RecursiveMacroDef s e i -> formatError fp (Just (s, e)) (T.pack $ printf "'%s' is a recursive macro definition." i) Nothing (Just $ sliceFile ftext s e)
-    NonGlblMacroDef s e -> formatError fp (Just (s, e)) "Invalid declaration of macro." (Just "Macros can only be defined locally.") (Just $ sliceFile ftext s e)
+    InvalidArgType range i t -> formatError fp (Just range) (T.pack $ printf "Invalid type has been given to function argument '%s' - '%s'." i (show t)) (Just "An undefined/unit type arg is disallowed.") (Just $ sliceFile ftext range)
+    RecursiveMacroDef range i -> formatError fp (Just range) (T.pack $ printf "'%s' is a recursive macro definition." i) Nothing (Just $ sliceFile ftext range)
+    NonGlblMacroDef range -> formatError fp (Just range) "Invalid declaration of macro." (Just "Macros can only be defined locally.") (Just $ sliceFile ftext range)
+    InvalidExpression range -> undefined
   where
-    formatError :: FilePath -> Maybe (LizPos, LizPos) -> T.Text -> Maybe T.Text -> Maybe T.Text -> [C.Chunk]
-    formatError f (Just (s, e)) errtxt (Just hinttxt) (Just slice) = (filePrefixWithLoc f s e) <> errorPrefix <> (errorText errtxt) <> (hintText hinttxt) <> slicePrefix <> (sliceText slice)
-    formatError f (Just (s, e)) errtxt (Just hinttxt) Nothing = (filePrefixWithLoc f s e) <> errorPrefix <> (errorText errtxt) <> (hintText hinttxt)
-    formatError f (Just (s, e)) errtxt Nothing (Just slice) = (filePrefixWithLoc f s e) <> errorPrefix <> (errorText errtxt) <> slicePrefix <> (sliceText slice)
-    formatError f (Just (s, e)) errtxt Nothing Nothing = (filePrefixWithLoc f s e) <> errorPrefix <> (errorText errtxt)
+    formatError :: FilePath -> Maybe LizRange -> T.Text -> Maybe T.Text -> Maybe T.Text -> [C.Chunk]
+    formatError f (Just range) errtxt (Just hinttxt) (Just slice) = (filePrefixWithLoc f range) <> errorPrefix <> (errorText errtxt) <> (hintText hinttxt) <> slicePrefix <> (sliceText slice)
+    formatError f (Just range) errtxt (Just hinttxt) Nothing = (filePrefixWithLoc f range) <> errorPrefix <> (errorText errtxt) <> (hintText hinttxt)
+    formatError f (Just range) errtxt Nothing (Just slice) = (filePrefixWithLoc f range) <> errorPrefix <> (errorText errtxt) <> slicePrefix <> (sliceText slice)
+    formatError f (Just range) errtxt Nothing Nothing = (filePrefixWithLoc f range) <> errorPrefix <> (errorText errtxt)
     formatError f Nothing errtxt (Just hinttxt) (Just slice) = (filePrefixNoLoc f) <> errorPrefix <> (errorText errtxt) <> (hintText hinttxt) <> slicePrefix <> (sliceText slice)
     formatError f Nothing errtxt (Just hinttxt) Nothing = (filePrefixNoLoc f) <> errorPrefix <> (errorText errtxt) <> (hintText hinttxt)
     formatError f Nothing errtxt Nothing (Just slice) = (filePrefixNoLoc f) <> errorPrefix <> (errorText errtxt) <> slicePrefix <> (sliceText slice)
     formatError f Nothing errtxt Nothing Nothing = (filePrefixNoLoc f) <> errorPrefix <> (errorText errtxt)
 
-    filePrefixWithLoc :: FilePath -> LizPos -> LizPos -> [C.Chunk]
-    filePrefixWithLoc f (sL, sC) (eL, eC) = [
-        C.bold $ C.chunk $ T.pack $ printf "%s@%s:%s-%s:%s\n" f (show $ unPos sL) (show $ unPos sC) (show $ unPos eL) (show $ unPos eC)
-      ]
+    filePrefixWithLoc :: FilePath -> LizRange -> [C.Chunk]
+    filePrefixWithLoc f (LizRange sL eL) = 
+      let 
+        message = 
+          if sL == eL then printf "%s;\nLine %s:\n" f (show sL)
+                      else printf "%s;\nLine %s to line %s:\n" f (show sL) (show eL)
+      in [C.bold $ C.chunk $ T.pack message]
 
     filePrefixNoLoc :: FilePath -> [C.Chunk]
-    filePrefixNoLoc f = [C.bold $ C.chunk $ T.pack $ printf "%s@all\n" f]
+    filePrefixNoLoc f = [C.bold $ C.chunk $ T.pack $ printf "%s:\n" f]
 
     errorPrefix :: [C.Chunk]
     errorPrefix = [
@@ -89,7 +85,7 @@ prettifyErr expr fp ftext =
     hintText t = [C.fore hintColour $ C.chunk "  [HINT] ~ ", C.fore hintColour $ C.chunk (t <> "\n")]
 
     slicePrefix :: [C.Chunk]
-    slicePrefix = [(C.fore textColour) $ C.chunk $ "  In this code:\n"]
+    slicePrefix = [(C.fore textColour) $ C.chunk $ "  In this snippet:\n"]
 
     sliceText :: T.Text -> [C.Chunk]
     sliceText txt = [(C.fore C.red) $ C.chunk $ txt <> "\n"]

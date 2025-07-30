@@ -9,22 +9,23 @@ import Liz.Common.Types
 import Text.Printf (printf)
 import Text.Megaparsec
 
-data SemErr = IncorrectType LizPos LizPos Type Type -- expected type ; given type
-  | IncorrectTypes LizPos LizPos T.Text [Type] -- expected types ; given type
-  | FailedLitInference LizPos LizPos T.Text
-  | UndefinedIdentifier LizPos LizPos T.Text
-  | IdentifierAlreadyInUse LizPos LizPos T.Text
-  | AssigningToConstant LizPos LizPos T.Text
-  | AssigningToFunction LizPos LizPos T.Text
-  | NotEnoughArgs LizPos LizPos T.Text Int
-  | TooManyArgs LizPos LizPos T.Text Int
-  | IncorrectArgTypes LizPos LizPos T.Text [Type] [Type] -- expected types ; given types
+data SemErr = IncorrectType LizRange Type Type -- expected type ; given type
+  | IncorrectTypes LizRange T.Text [Type] -- expected types ; given type
+  | FailedLitInference LizRange T.Text
+  | UndefinedIdentifier LizRange T.Text
+  | IdentifierAlreadyInUse LizRange T.Text
+  | AssigningToConstant LizRange T.Text
+  | AssigningToFunction LizRange T.Text
+  | NotEnoughArgs LizRange T.Text Int
+  | TooManyArgs LizRange T.Text Int
+  | IncorrectArgTypes LizRange T.Text [Type] [Type] -- expected types ; given types
   | NoEntrypoint
   | MultipleEntrypoints
   | NotImplemented SExpr
-  | InvalidArgType LizPos LizPos T.Text Type
-  | RecursiveMacroDef LizPos LizPos T.Text
-  | NonGlblMacroDef LizPos LizPos
+  | InvalidArgType LizRange T.Text Type
+  | RecursiveMacroDef LizRange T.Text
+  | NonGlblMacroDef LizRange
+  | InvalidExpression LizRange
   deriving (Show, Eq)
 
 data PError = FailedTypeInference T.Text

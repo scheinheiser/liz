@@ -52,13 +52,6 @@ data Arg = Arg
   , argType   :: Type
   } deriving (Show, Eq)
 
-data Func = Func 
-  { funcIdent       :: T.Text
-  , funcPos         :: LizRange
-  , funcArgs        :: [Arg]
-  , funcReturnType  :: Type
-  , funcBody        :: [SExpr]
-  } deriving (Show, Eq)
 
 data Var = Var
   { varIdent    :: T.Text
@@ -75,8 +68,26 @@ data Macro = Macro
 
 data LizRange = LizRange !Int !Int
   deriving (Show, Eq)
- 
-newtype Program = Program [SExpr]
+
+data Program = Program [Func] [GlblVar] [Macro]
+  deriving (Show, Eq)
+
+instance Semigroup Program where
+  (<>) (Program f1 g1 m1) (Program f2 g2 m2) =
+    Program (f1 <> f2) (g1 <> g2) (m1 <> m2)
+
+instance Monoid Program where
+  mempty = Program [] [] []
+
+data Func = Func 
+  { funcIdent       :: T.Text
+  , funcPos         :: LizRange
+  , funcArgs        :: [Arg]
+  , funcReturnType  :: Type
+  , funcBody        :: [SExpr]
+  } deriving (Show, Eq)
+
+data GlblVar = GlblVar LizRange Var
   deriving (Show, Eq)
 
 data Expression = EBinary BinaryOp LizRange Expression Expression
@@ -89,8 +100,7 @@ data Expression = EBinary BinaryOp LizRange Expression Expression
   | EValueMacro T.Text LizRange
   deriving (Show, Eq)
 
-data ControlFlow = FFunc Func
-  | FBlockStmt LizRange [SExpr]
+data ControlFlow = FBlockStmt LizRange [SExpr]
   | FIfStmt    LizRange Expression SExpr (Maybe SExpr) -- cond - truebranch - optional falsebranch
   deriving (Show, Eq)
 
@@ -100,6 +110,5 @@ data SExpr = SEComment
   | SEConst     LizRange Var
   | SESet       LizRange T.Text Expression
   | SEFlow      ControlFlow
-  | SEMacroDef  Macro
   | SEType      Type
   deriving (Show, Eq)

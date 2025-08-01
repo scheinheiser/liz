@@ -14,6 +14,7 @@ import Data.Char (isAlphaNum, isDigit, isPrint)
 import Control.Monad (void, liftM)
 import Data.List (find)
 import Unsafe.Coerce (unsafeCoerce)
+import Data.Foldable (fold)
 
 import Text.Megaparsec hiding (count)
 import Text.Megaparsec.Char
@@ -181,7 +182,7 @@ parseRet = do
   e <- getCurrentLine
   pure $ EReturn (LizRange s e) v
 
-parseMacroDef :: Parser SExpr
+parseMacroDef :: Parser Macro
 parseMacroDef = do
   s <- getCurrentLine
   _ <- string "macro"
@@ -190,7 +191,7 @@ parseMacroDef = do
   hspace1
   v <- parseExpr
   e <- getCurrentLine
-  pure $ SEMacroDef $ Macro (LizRange s e) i v
+  pure $ Macro (LizRange s e) i v
 
 parseComment :: Parser SExpr
 parseComment = do
@@ -222,6 +223,26 @@ parseVarDecl = do
       pure $ decl (LizRange s e) Var{varIdent=iden, varType=ty, varValue=lit}
     aux _ _ _ op = unsupportedDeclaration $ T.show op
 
+parseGlblVar :: Parser GlblVar
+parseGlblVar = do
+  s <- getCurrentLine
+  _ <- string "const"
+  hspace1
+  ident <- parseIdent False
+  hspace1 
+  ty <- (liftM SEType parseType) <|> (liftM SEExpr parseExpr)
+  aux s ident ty
+  where
+    aux s iden (SEType ty) = do
+      _ <- some hspace1
+      value <- L.lineFold scn $ \_ -> parseExpr
+      e <- getCurrentLine
+      pure $ GlblVar (LizRange s e) Var{varIdent=iden, varType=ty, varValue=value}
+    aux s iden (SEExpr lit@(ELiteral ty _ _)) = do
+      e <- getCurrentLine
+      pure $ GlblVar (LizRange s e) Var{varIdent=iden, varType=ty, varValue=lit}
+    aux _ _ op = unsupportedDeclaration $ T.show op
+
 parseSetStmt :: Parser SExpr
 parseSetStmt = do
   s <- getCurrentLine
@@ -233,7 +254,7 @@ parseSetStmt = do
   e <- getCurrentLine
   pure $ SESet (LizRange s e) ident value
 
-parseFuncDecl :: Parser SExpr
+parseFuncDecl :: Parser Func
 parseFuncDecl = do
    s <- getCurrentLine
    _ <- string "def"
@@ -248,7 +269,7 @@ parseFuncDecl = do
 
    block <- some $ L.lineFold scn $ \_ -> parseSExpr
    e <- getCurrentLine
-   pure $ SEFlow $ FFunc Func {funcIdent = ident, funcPos = LizRange s e, funcArgs = args, funcReturnType = retTy, funcBody = block}
+   pure $ Func {funcIdent = ident, funcPos = LizRange s e, funcArgs = args, funcReturnType = retTy, funcBody = block}
    where
     parseOpId :: Parser T.Text
     parseOpId = do
@@ -356,29 +377,48 @@ parseIfStmt = do
 parseSExpr :: Parser SExpr
 parseSExpr = (between (char '(') (char ')') $ 
   label "valid S-Expression" 
-    (choice [parseFuncDecl
-            , parseVarDecl
+    (choice [ parseVarDecl
             , parseSetStmt
             , parseIfStmt
             , SEExpr <$> parseRet
             , SEExpr <$> parsePrint
-            , parseMacroDef
             , parseBlock
             , SEExpr <$> parseFuncCall
             ])) <|> parseComment
 
-parseProgram :: Parser [SExpr]
-parseProgram = some $ scn >> parseSExpr
+parseProgram :: Parser Program
+parseProgram = do
+  res <- some $ try $ scn >> aux
+  pure $ fold res
+  where
+    aux :: Parser Program
+    aux = 
+      (do
+        between (char '(') (char ')') $
+          (do
+            func <- parseFuncDecl
+            pure $ Program [func] [] [])
+          <|>
+          (do
+            var <- parseGlblVar
+            pure $ Program [] [var] [])
+          <|>
+          (do
+            macro <- parseMacroDef
+            pure $ Program [] [] [macro]))
+      <|> (parseComment >> mempty)
 
 parseFile :: FilePath -> T.Text -> Either (ParseErrorBundle T.Text E.PError) Program
 parseFile f fc = do
   case (parse parseProgram f fc) of
     (Left err) -> Left err
-    (Right v) -> Right $ Program (removeComments v)
+    (Right (Program funcs glbls macros)) -> Right $ Program (map aux funcs) glbls macros
   where
+    aux :: Func -> Func
+    aux fn@Func{funcBody=body} = fn{funcBody = removeComments body}
+
     removeComments :: [SExpr] -> [SExpr]
     removeComments [] = []
     removeComments (SEComment : rest) = removeComments rest
-    removeComments (SEFlow (FFunc func@(Func{funcBody=body})) : rest) = (SEFlow $ FFunc func{funcBody=filter (SEComment /=) body}) : removeComments rest
     removeComments (SEFlow (FBlockStmt r body) : rest) = (SEFlow $ FBlockStmt r (filter (SEComment /=) body)) : removeComments rest
     removeComments (expr : rest) = expr : removeComments rest

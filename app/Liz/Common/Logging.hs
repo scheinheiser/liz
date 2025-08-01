@@ -46,10 +46,10 @@ prettifyErr expr fp ftext =
     NoEntrypoint -> formatError fp Nothing ("Couldn't find entry point.") (Just "Consider adding a 'main' function.") Nothing
     MultipleEntrypoints -> formatError fp Nothing ("Multiple entry points in file.") (Just "Consider renaming one of them.") Nothing
     NotImplemented s -> formatError fp Nothing (T.pack $ printf "SExpression has not been implemented; '%s'." (show s)) Nothing Nothing
-    InvalidArgType range i t -> formatError fp (Just range) (T.pack $ printf "Invalid type has been given to function argument '%s' - '%s'." i (show t)) (Just "An undefined/unit type arg is disallowed.") (Just $ sliceFile ftext range)
+    InvalidArgType range i t -> formatError fp (Just range) (T.pack $ printf "Invalid type has been given to function argument '%s' - '%s'." i (show t)) (Just "An unit type arg is disallowed.") (Just $ sliceFile ftext range)
     RecursiveMacroDef range i -> formatError fp (Just range) (T.pack $ printf "'%s' is a recursive macro definition." i) Nothing (Just $ sliceFile ftext range)
     NonGlblMacroDef range -> formatError fp (Just range) "Invalid declaration of macro." (Just "Macros can only be defined locally.") (Just $ sliceFile ftext range)
-    InvalidExpression range -> undefined
+    InvalidBinaryExpr range -> formatError fp (Just range) "Invalid binary expression." Nothing (Just $ sliceFile ftext range)
   where
     formatError :: FilePath -> Maybe LizRange -> T.Text -> Maybe T.Text -> Maybe T.Text -> [C.Chunk]
     formatError f (Just range) errtxt (Just hinttxt) (Just slice) = (filePrefixWithLoc f range) <> errorPrefix <> (errorText errtxt) <> (hintText hinttxt) <> slicePrefix <> (sliceText slice)
@@ -65,8 +65,8 @@ prettifyErr expr fp ftext =
     filePrefixWithLoc f (LizRange sL eL) = 
       let 
         message = 
-          if sL == eL then printf "%s;\nLine %s:\n" f (show sL)
-                      else printf "%s;\nLine %s to line %s:\n" f (show sL) (show eL)
+          if sL == eL then printf "%s;\nline %s:\n" f (show sL)
+                      else printf "%s;\nline %s to line %s:\n" f (show sL) (show eL)
       in [C.bold $ C.chunk $ T.pack message]
 
     filePrefixNoLoc :: FilePath -> [C.Chunk]

@@ -25,7 +25,7 @@ data SemErr = IncorrectType LizRange Type Type -- expected type ; given type
   | InvalidArgType LizRange T.Text Type
   | RecursiveMacroDef LizRange T.Text
   | NonGlblMacroDef LizRange
-  | InvalidExpression LizRange
+  | InvalidBinaryExpr LizRange
   deriving (Show, Eq)
 
 data PError = FailedTypeInference T.Text

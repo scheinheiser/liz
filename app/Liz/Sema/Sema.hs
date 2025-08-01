@@ -14,8 +14,7 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 
 import Data.List (mapAccumL)
-import Data.Either (lefts)
-import Data.Maybe (catMaybes)
+import Data.Either (lefts, rights)
 import Data.Foldable (fold)
 
 data Env = Env 
@@ -36,73 +35,82 @@ inferBody exprs env =
       ((env'', expr' : acc), env'')) (env, []) exprs
 
 analyseAndPrintErrs :: L.Program -> FilePath -> String -> IO ()
-analyseAndPrintErrs (L.Program prog) f ftext = do
-  let (prog_errs, subbed_prog) = collectErrors (subBody prog mkMacroTbl) in
-    if length prog_errs /= 0 
-    then Log.printErrs f ftext (reverse prog_errs) []
-    else 
-      let
-        subbed_prog' = catMaybes subbed_prog
-        (res, hasMain) = aux subbed_prog' mkEnv 0 []
-        errs = fold $ lefts res
-      in
-      case () of _
-                  | length errs /= 0 && hasMain > 1 -> Log.printErrs f ftext (E.MultipleEntrypoints : errs) []
-                  | length errs /= 0 && hasMain == 0 -> Log.printErrs f ftext (E.NoEntrypoint : errs) []
-                  | length errs /= 0 -> Log.printErrs f ftext errs []
-                  | hasMain == 0 -> Log.printErrs f ftext [E.NoEntrypoint] []
-                  | hasMain > 1 -> Log.printErrs f ftext [E.MultipleEntrypoints] []
-                  | otherwise -> putStrLn "all good"
+analyseAndPrintErrs prog f ftext =
+  let 
+    subbed_prog = substituteMacros prog 
+    errs = fold $ lefts [subbed_prog]
+  in
+  if length errs /= 0 
+  then Log.printErrs f ftext errs []
+  else
+    let
+      (L.Program funcs' glbls' _) = head' $ rights [subbed_prog]
+      (glbl_errs, env') = inferGlbls glbls' mkEnv []
+      (func_errs, mainCount) = inferFuncs funcs' env' 0 []
+    in
+    case () of _
+                | length glbl_errs /= 0 && length func_errs /= 0 && mainCount > 1 -> Log.printErrs f ftext ((E.MultipleEntrypoints : glbl_errs) <> func_errs) []
+                | length glbl_errs /= 0 && length func_errs /= 0 && mainCount == 0 -> Log.printErrs f ftext (E.NoEntrypoint : func_errs) []
+                | length glbl_errs /= 0 && mainCount > 1 -> Log.printErrs f ftext (E.MultipleEntrypoints : glbl_errs) []
+                | length glbl_errs /= 0 && mainCount == 0 -> Log.printErrs f ftext (E.NoEntrypoint : glbl_errs) []
+                | length func_errs /= 0 && mainCount > 1 -> Log.printErrs f ftext (E.MultipleEntrypoints : func_errs) []
+                | length func_errs /= 0 && mainCount == 0 -> Log.printErrs f ftext (E.NoEntrypoint : func_errs) []
+                | length glbl_errs /= 0 -> Log.printErrs f ftext glbl_errs []
+                | length func_errs /= 0 -> Log.printErrs f ftext func_errs []
+                | mainCount > 1 -> Log.printErrs f ftext [E.MultipleEntrypoints] []
+                | mainCount == 0 -> Log.printErrs f ftext [E.NoEntrypoint] []
+                | otherwise -> putStrLn "all good"
   where
-    aux :: [L.SExpr] -> Env -> Int -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Int)
-    aux [] _ hasMain acc = (acc, hasMain)
-    aux (ex@(L.SEFlow (L.FFunc L.Func{funcIdent=i})) : exprs) sym hasMain acc =
-      let
-        (res, next) = infer ex sym
-      in if i == "main" then aux exprs next (hasMain + 1) (res : acc)
-                        else aux exprs next hasMain (res : acc)
-    aux (ex : exprs) sym hasMain acc =
-      let
-        (res, next) = infer ex sym
-      in aux exprs next hasMain (res : acc)
+    inferGlbls :: [L.GlblVar] -> Env -> [Either [E.SemErr] L.Type] -> ([E.SemErr], Env)
+    inferGlbls [] env acc = (fold $ lefts acc, env)
+    inferGlbls ((L.GlblVar range v) : gs) env acc =
+      let (result, env') = inferVariable range v env True in
+      inferGlbls gs env' (result : acc)
+
+    inferFuncs :: [L.Func] -> Env -> Int -> [Either [E.SemErr] L.Type] -> ([E.SemErr], Int)
+    inferFuncs [] _ i acc = (fold $ lefts acc, i)
+    inferFuncs (fn@L.Func{funcIdent=ident} : fs) env i acc =
+      let (result, env') = inferFunc fn env in
+      if ident == "main" then inferFuncs fs env' (i + 1) (result : acc)
+                         else inferFuncs fs env' i (result : acc)
 
 -- TODO: Allow declarations in any order.
 analyseProgram :: L.Program -> Either [E.SemErr] L.Program
-analyseProgram (L.Program prog) = 
-  let (prog_errs, subbed_prog) = collectErrors (subBody prog mkMacroTbl) in
-  if length prog_errs /= 0 
-  then Left prog_errs
-  else
-    let
-      subbed_prog' = catMaybes (reverse subbed_prog)
-      (res, hasMain) = aux subbed_prog' mkEnv 0 []
-      errs = fold $ lefts res
-    in
-    case () of _
-                | length errs /= 0 && hasMain > 1 -> Left $ E.MultipleEntrypoints : errs
-                | length errs /= 0 && hasMain == 0 -> Left $ E.NoEntrypoint : errs
-                | length errs /= 0 -> Left errs
-                | hasMain == 0 -> Left [E.NoEntrypoint]
-                | hasMain > 1 -> Left [E.MultipleEntrypoints]
-                | otherwise -> Right $ L.Program subbed_prog'
+analyseProgram prog = do
+  subbed_prog@(L.Program funcs' glbls' _) <- substituteMacros prog
+  let 
+    (glbl_errs, env') = inferGlbls glbls' mkEnv []
+    (func_errs, mainCount) = inferFuncs funcs' env' 0 []
+  case () of _
+  -- TODO: do something about this
+              | length glbl_errs /= 0 && length func_errs /= 0 && mainCount > 1 -> Left $ (E.MultipleEntrypoints : glbl_errs) <> func_errs
+              | length glbl_errs /= 0 && length func_errs /= 0 && mainCount == 0 -> Left $ E.NoEntrypoint : func_errs
+              | length glbl_errs /= 0 && mainCount > 1 -> Left $ E.MultipleEntrypoints : glbl_errs
+              | length glbl_errs /= 0 && mainCount == 0 -> Left $ E.NoEntrypoint : glbl_errs
+              | length func_errs /= 0 && mainCount > 1 -> Left $ E.MultipleEntrypoints : func_errs
+              | length func_errs /= 0 && mainCount == 0 -> Left $ E.NoEntrypoint : func_errs
+              | length glbl_errs /= 0 -> Left glbl_errs
+              | length func_errs /= 0 -> Left func_errs
+              | mainCount > 1 -> Left [E.MultipleEntrypoints]
+              | mainCount == 0 -> Left [E.NoEntrypoint]
+              | otherwise -> Right subbed_prog
   where
-    aux :: [L.SExpr] -> Env -> Int -> [Either [E.SemErr] L.Type] -> ([Either [E.SemErr] L.Type], Int)
-    aux [] _ hasMain acc = (acc, hasMain)
-    aux (ex@(L.SEFlow (L.FFunc L.Func{funcIdent=i})) : exprs) env hasMain acc =
-      let
-        (res, env') = infer ex env
-      in if i == "main" then aux exprs env' (hasMain + 1) (res : acc)
-                        else aux exprs env' hasMain (res : acc)
-    aux (ex : exprs) env hasMain acc =
-      let
-        (res, env') = infer ex env
-      in aux exprs env' hasMain (res : acc)
+    inferGlbls :: [L.GlblVar] -> Env -> [Either [E.SemErr] L.Type] -> ([E.SemErr], Env)
+    inferGlbls [] env acc = (fold $ lefts acc, env)
+    inferGlbls ((L.GlblVar range v) : gs) env acc =
+      let (result, env') = inferVariable range v env True in
+      inferGlbls gs env' (result : acc)
 
+    inferFuncs :: [L.Func] -> Env -> Int -> [Either [E.SemErr] L.Type] -> ([E.SemErr], Int)
+    inferFuncs [] _ i acc = (fold $ lefts acc, i)
+    inferFuncs (f@L.Func{funcIdent=ident} : fs) env i acc =
+      let (result, env') = inferFunc f env in
+      if ident == "main" then inferFuncs fs env' (i + 1) (result : acc)
+                         else inferFuncs fs env' i (result : acc)
 
 -- main typechecking/sema functions.
 infer :: L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
 infer (L.SEExpr ex) env = inferExpr ex env
-infer (L.SEFlow (L.FFunc f)) env = inferFunc f env
 infer (L.SEFlow (L.FBlockStmt _ body)) env = inferBlock body env
 infer (L.SEFlow (L.FIfStmt range cond tbr fbr)) env = inferIfStmt range cond tbr fbr env
 infer (L.SEVar range v) env = inferVariable range v env False
@@ -119,6 +127,7 @@ inferExpr (L.EReturn _ v) env = inferExpr v env
 inferExpr (L.EPrint _ _) env = (Right L.Unit', env)
 inferExpr (L.EFuncCall range iden args) env = inferFuncCall range iden args env
 inferExpr (L.EIdentifier iden range) env = inferIdentifier range iden env
+inferExpr expr _ = error $ "failed with " <> (show expr)
 
 inferIdentifier :: L.LizRange -> T.Text -> Env -> (Either [E.SemErr] L.Type, Env)
 inferIdentifier range iden env@(Env {envFuncs=fenv, envVars=venv, envConsts=cenv}) =
@@ -151,6 +160,9 @@ checkUnary range op v env =
     aux L.Not t = Left $ [E.IncorrectType range L.Bool' t]
 
 checkBinary :: L.LizRange -> L.BinaryOp -> L.Expression -> L.Expression -> Env -> (Either [E.SemErr] L.Type, Env)
+checkBinary range _ (L.EReturn _ _) (L.EReturn _ _) env = (Left [E.InvalidBinaryExpr range], env)
+checkBinary range _ _ (L.EReturn _ _) env = (Left [E.InvalidBinaryExpr range], env)
+checkBinary range _ (L.EReturn _ _) _ env = (Left [E.InvalidBinaryExpr range], env)
 checkBinary range op l r env =
   case (inferExpr l env, inferExpr r env) of
     ((Left el, env'), (Left er, _)) -> (Left $ el <> er, env')

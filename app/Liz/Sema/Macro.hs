@@ -115,7 +115,7 @@ multiSubExpr dec body tbl =
         aux [] _ = []
         aux (x : xs) tbl' = let (res, tbl'') = macroSubExpr x tbl' in res : aux xs tbl''
 
--- main macro sub function
+-- main macro sub functions
 substituteMacros :: L.Program -> Either [E.SemErr] L.Program
 substituteMacros (L.Program funcs glbls macros) = do
   tbl <- populateMacroTbl macros
@@ -131,14 +131,14 @@ substituteMacros (L.Program funcs glbls macros) = do
   where
     subGlbls :: [L.GlblVar] -> MacroTbl -> [Either [E.SemErr] L.GlblVar]
     subGlbls [] _ = []
-    subGlbls ((L.GlblVar r var@L.Var{varValue=v}) : gs) tbl =
+    subGlbls (gvar@(L.GlblVar r var@L.Var{varValue=v}) : gs) tbl =
       case v of
         L.EValueMacro i range ->
           let value = i `M.lookup` tbl in
           case value of
             Just sub -> (Right $ L.GlblVar r var{L.varValue=sub}) : subGlbls gs tbl
             Nothing -> (Left $ [E.UndefinedIdentifier range i]) : subGlbls gs tbl
-        _ -> subGlbls gs tbl
+        _ -> (Right gvar) : subGlbls gs tbl
 
     subFuncs :: [L.Func] -> MacroTbl -> [Either [E.SemErr] L.Func]
     subFuncs [] _ = []

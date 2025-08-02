@@ -203,19 +203,19 @@ parseComment = do
     valid = liftA2 (||) isPrint ('\n' /=)
 
 -- TODO: refactor parsing to remove the need for SEType.
-parseVarDecl :: Parser (LizRange -> Var -> a) -> Parser a
-parseVarDecl dec = do
+parseVarDecl :: Parser (LizRange -> Var -> a) -> Parser Expression -> Parser a
+parseVarDecl dec varParse = do
   s <- getCurrentLine
   decType <- dec
   hspace1
   ident <- parseIdent False
   hspace1 
-  ty <- (liftM SEType parseType) <|> (liftM SEExpr parseExpr)
+  ty <- (liftM SEType parseType) <|> (liftM SEExpr varParse)
   aux decType s ident ty
   where
     aux decl s iden (SEType ty) = do
       _ <- some hspace1
-      value <- L.lineFold scn $ \_ -> parseExpr
+      value <- L.lineFold scn $ \_ -> varParse
       e <- getCurrentLine
       pure $ decl (LizRange s e) Var{varIdent=iden, varType=ty, varValue=value}
     aux decl s iden (SEExpr lit@(ELiteral ty _ _)) = do
@@ -357,7 +357,7 @@ parseIfStmt = do
 parseSExpr :: Parser SExpr
 parseSExpr = (between (char '(') (char ')') $ 
   label "valid S-Expression" 
-    (choice [ parseVarDecl (SEVar <$ string "var" <|> SEConst <$ string "const")
+    (choice [ parseVarDecl (SEVar <$ string "var" <|> SEConst <$ string "const") parseExpr
             , parseSetStmt
             , parseIfStmt
             , SEExpr <$> parseRet
@@ -379,7 +379,7 @@ parseProgram = do
             pure $ Program [func] [] [])
           <|>
           (do
-            var <- parseVarDecl (GlblVar <$ string "const")
+            var <- parseVarDecl (GlblVar <$ string "const") parseValue
             pure $ Program [] [var] [])
           <|>
           (do

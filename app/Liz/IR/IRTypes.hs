@@ -22,7 +22,7 @@ instance Pretty Label where
 data Val = Integ Int
   | Bln Bool
   | Flt Double
-  | Str T.Text
+  | Str T.Text T.Text
   | Chr Char
   | Unt 
   deriving Show
@@ -32,7 +32,7 @@ instance Pretty Val where
   pretty (Flt i) = viaShow i
   pretty (Bln i) = viaShow i
   pretty (Chr i) = viaShow i
-  pretty (Str i) = (pretty @T.Text "string") <> lbracket <> (pretty i) <> rbracket
+  pretty (Str i _) = (pretty @T.Text "string") <> lbracket <> (pretty $ T.drop 3 i) <> rbracket
   pretty Unt = pretty @T.Text "()"
 
 data Expr = Bin T.Text L.Type L.BinaryOp Expr Expr
@@ -60,12 +60,11 @@ instance Pretty Expr where
       <> (parens . hsep . punctuate comma $ map pretty exprs)
   pretty (EVal v) = pretty v
 
-type IRBlock = [IROp]
+type IRBlock = [CFlow]
 
 data CFlow = IfStmt LabelIdent Expr Goto Label (Maybe Label) -- if statement id (for codegen) - cond - true branch - optional false branch
   | Lbl Label
   | BlockStmt LabelIdent IRBlock
-  | CGoto Goto -- a wrapper around goto for control flow/leader algorithm
   deriving Show
 
 instance Pretty CFlow where
@@ -73,7 +72,6 @@ instance Pretty CFlow where
   pretty (Lbl lbl) = pretty lbl
   pretty (BlockStmt _ exprs) =
     (pretty @T.Text "block:") <> line <> (indent 2 . vcat $ map pretty exprs)
-  pretty (CGoto name) = (pretty @T.Text "goto") <+> (pretty name)
 
 data Variable = Variable T.Text L.Type Expr
   deriving Show
@@ -83,15 +81,15 @@ instance Pretty Variable where
 
 data IROp = IRExpr Expr
   | IRVar Variable
-  | IRFlow CFlow
+  | IRGoto Goto 
   deriving Show
 
 instance Pretty IROp where
   pretty (IRExpr ex) = pretty ex
-  pretty (IRFlow flow) = pretty flow
   pretty (IRVar v) = pretty v 
+  pretty (IRGoto name) = (pretty @T.Text "goto") <+> (pretty name)
 
-data Fn = Fn T.Text [L.Arg] [IROp] L.Type -- identifier - exprs - return type
+data Fn = Fn T.Text [L.Arg] [CFlow] L.Type -- identifier - exprs - return type
   deriving Show
 instance Pretty Fn where
   pretty (Fn i args body retTy) =
@@ -103,7 +101,7 @@ instance Pretty Fn where
 data IR = IR 
   { irFuncs            :: [Fn]
   , irGlbls            :: [Variable]
-  , irAllocatedStrings :: [(T.Text, Int)]
+  , irAllocatedStrings :: [(T.Text, T.Text)] -- lit, 'index'
   , irStringIdx        :: !Int
   , irTempVarIdx       :: !Int -- to provide identifiers for temporary variables
   , irCFlowIdx         :: !Int -- to provide labels for control flow statements.

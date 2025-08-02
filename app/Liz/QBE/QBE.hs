@@ -88,7 +88,6 @@ instance Pretty Value where
   pretty (VConst v) = pretty v
   pretty (VTemp i) = pretty i
 
-
 data DataDef = DataDef (Ident Global) (Maybe Alignment) (NE.NonEmpty DataItem)
 data DataItem = DIExt Ext (NE.NonEmpty DataItem)
   | DIString T.Text

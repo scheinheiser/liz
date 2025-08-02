@@ -20,7 +20,7 @@ executable liz
       , Liz.Common.Logging
       , Liz.Sema.Sema
       , Liz.Sema.Macro
-      -- , Liz.Codegen
+      , Liz.Codegen
       , Liz.IR.IR
       , Liz.IR.IRTypes
       , Liz.QBE.QBE
@@ -45,7 +45,7 @@ test-suite liz-test
       , Liz.ParserSpec
       , Liz.Sema.Sema
       , Liz.Sema.Macro
-      -- , Liz.Codegen
+      , Liz.Codegen
       , Liz.IR.IR
       , Liz.IR.IRTypes
       , Liz.QBE.QBE

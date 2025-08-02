@@ -203,10 +203,10 @@ parseComment = do
     valid = liftA2 (||) isPrint ('\n' /=)
 
 -- TODO: refactor parsing to remove the need for SEType.
-parseVarDecl :: Parser SExpr
-parseVarDecl = do
+parseVarDecl :: Parser (LizRange -> Var -> a) -> Parser a
+parseVarDecl dec = do
   s <- getCurrentLine
-  decType <- SEVar <$ string "var" <|> SEConst <$ string "const"
+  decType <- dec
   hspace1
   ident <- parseIdent False
   hspace1 
@@ -222,26 +222,6 @@ parseVarDecl = do
       e <- getCurrentLine
       pure $ decl (LizRange s e) Var{varIdent=iden, varType=ty, varValue=lit}
     aux _ _ _ op = unsupportedDeclaration $ T.show op
-
-parseGlblVar :: Parser GlblVar
-parseGlblVar = do
-  s <- getCurrentLine
-  _ <- string "const"
-  hspace1
-  ident <- parseIdent False
-  hspace1 
-  ty <- (liftM SEType parseType) <|> (liftM SEExpr parseExpr)
-  aux s ident ty
-  where
-    aux s iden (SEType ty) = do
-      _ <- some hspace1
-      value <- L.lineFold scn $ \_ -> parseExpr
-      e <- getCurrentLine
-      pure $ GlblVar (LizRange s e) Var{varIdent=iden, varType=ty, varValue=value}
-    aux s iden (SEExpr lit@(ELiteral ty _ _)) = do
-      e <- getCurrentLine
-      pure $ GlblVar (LizRange s e) Var{varIdent=iden, varType=ty, varValue=lit}
-    aux _ _ op = unsupportedDeclaration $ T.show op
 
 parseSetStmt :: Parser SExpr
 parseSetStmt = do
@@ -377,7 +357,7 @@ parseIfStmt = do
 parseSExpr :: Parser SExpr
 parseSExpr = (between (char '(') (char ')') $ 
   label "valid S-Expression" 
-    (choice [ parseVarDecl
+    (choice [ parseVarDecl (SEVar <$ string "var" <|> SEConst <$ string "const")
             , parseSetStmt
             , parseIfStmt
             , SEExpr <$> parseRet
@@ -393,14 +373,13 @@ parseProgram = do
   where
     aux :: Parser Program
     aux = 
-      (do
-        between (char '(') (char ')') $
+      (between (char '(') (char ')') $
           (do
             func <- parseFuncDecl
             pure $ Program [func] [] [])
           <|>
           (do
-            var <- parseGlblVar
+            var <- parseVarDecl (GlblVar <$ string "const")
             pure $ Program [] [var] [])
           <|>
           (do

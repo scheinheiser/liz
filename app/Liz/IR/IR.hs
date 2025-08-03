@@ -2,7 +2,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OrPatterns #-}
 
-module Liz.IR.IR (ppIR, programToIR) where
+module Liz.IR.IR (ppIR, programToIR, flattenExpr) where
 
 import Liz.IR.IRTypes
 import qualified Liz.Common.Types as L
@@ -186,14 +186,15 @@ fromExpr (L.EFuncCall _ ident params) ir@IR{irSymbols=symmap, irTempVarIdx=i} =
   (FuncCall temp_i ty ident params', ir'''{irTempVarIdx=i + 1})
 
 -- FIX: detect if there's nested if statements
+-- TODO: add 'end' label suffixes.
 patchJumps :: NE.NonEmpty CFlow -> IR -> [CFlow]
 patchJumps = aux . NE.toList
   where
     aux :: [CFlow] -> IR -> [CFlow]
     aux [] _ = []
-    aux (stmt : rest@((IfStmt n _ _ _ _) : _)) ir = (patchCFlow stmt n) : (aux rest ir)
-    aux (stmt : rest@((Lbl (Label (n, _))) : _)) ir = (patchCFlow stmt n) : (aux rest ir)
-    aux (stmt : rest@((BlockStmt n _) : _)) ir = (patchCFlow stmt n) : (aux rest ir)
+    aux (stmt : rest@((IfStmt n _ _ _ _) : _)) ir = (patchCFlow stmt n ir) : (aux rest ir)
+    aux (stmt : rest@((Lbl (Label (n, _))) : _)) ir = (patchCFlow stmt n ir) : (aux rest ir)
+    aux (stmt : rest@((BlockStmt n _) : _)) ir = (patchCFlow stmt n ir) : (aux rest ir)
     aux [(IfStmt id' cond _ (Label (gototrue, exprs)) Nothing)] IR{irSymbols=symmap} =
       let 
         lastE = getLast $ last exprs
@@ -217,19 +218,26 @@ patchJumps = aux . NE.toList
       (IfStmt id' cond "end" (Label (gototrue, patched_texprs)) (Just (Label (gotofalse, patched_fexprs)))) : endlbl : []
     aux (expr : rest) ir = expr : aux rest ir
 
-    patchCFlow :: CFlow -> T.Text -> CFlow
-    patchCFlow (IfStmt id' cond _ (Label (gototrue, exprs)) Nothing) next =
+    patchCFlow :: CFlow -> T.Text -> IR -> CFlow
+    patchCFlow (IfStmt id' cond _ (Label (gototrue, exprs)) Nothing) next _ =
       let patched_exprs = exprs <> [IRGoto next] in
       (IfStmt id' cond next (Label (gototrue, patched_exprs)) Nothing)
-    patchCFlow (IfStmt id' cond _ (Label (gototrue, texprs)) (Just (Label (gotofalse, fexprs)))) next =
+    patchCFlow (IfStmt id' cond _ (Label (gototrue, texprs)) (Just (Label (gotofalse, fexprs)))) next _ =
       let 
         patched_texprs = texprs <> [IRGoto next] 
         patched_fexprs = fexprs <> [IRGoto next] 
       in (IfStmt id' cond next (Label (gototrue, patched_texprs)) (Just (Label (gotofalse, patched_fexprs))))
-    patchCFlow (BlockStmt id' exprs) next =
-      let patched_exprs = exprs <> [CGoto next] in
-      (BlockStmt id' patched_exprs)
-    patchCFlow (Lbl (Label (n, exprs))) next =
+    patchCFlow (BlockStmt id' exprs) next ir =
+      let 
+        patched_exprs = aux exprs ir 
+        gotoend = [Lbl $ Label ("end", [IRGoto next])]
+        patched_exprs' =
+          case (last patched_exprs) of
+            Lbl (Label ("end", _)) -> (init patched_exprs) <> gotoend
+            _ -> aux (patched_exprs <> gotoend) ir
+      in
+      (BlockStmt id' patched_exprs')
+    patchCFlow (Lbl (Label (n, exprs))) next _ =
       let patched_exprs = exprs <> [IRGoto next] in
       (Lbl $ Label (n, patched_exprs))
 
@@ -241,6 +249,31 @@ patchJumps = aux . NE.toList
     getLast (IRExpr ret@(Ret _)) = ret
     getLast (IRExpr (Print _)) = EVal Unt
     getLast v = error $ "\nMalformed IR -\n  " <> (show v)
+
+-- TODO: change to return nonempty
+flattenExpr :: Expr -> [Expr]
+flattenExpr (Bin i t op l@(Bin li _ _ _ _) r@(Bin ri _ _ _ _)) = (flattenExpr l) <> (flattenExpr r) <> [(Bin i t op (Ident li False) (Ident ri False))]
+flattenExpr (Bin i t op l@(Bin li _ _ _ _) r@(Un ri _ _ _)) = (flattenExpr l) <> (flattenExpr r) <> [(Bin i t op (Ident li False) (Ident ri False))] 
+flattenExpr (Bin i t op l@(Un li _ _ _) r@(Bin ri _ _ _ _)) = (flattenExpr l) <> (flattenExpr r) <> [(Bin i t op (Ident li False) (Ident ri False))] 
+flattenExpr (Bin i t op l@(Un li _ _ _) r@(Un ri _ _ _)) = (flattenExpr l) <> (flattenExpr r) <> [(Bin i t op (Ident li False) (Ident ri False))] 
+flattenExpr (Bin i t op l@(FuncCall li _ _ _) r@(Bin ri _ _ _ _)) = (flattenExpr l) <> (flattenExpr r) <> [(Bin i t op (Ident li False) (Ident ri False))] 
+flattenExpr (Bin i t op l@(FuncCall li _ _ _) r@(Un ri _ _ _)) = (flattenExpr l) <> (flattenExpr r) <> [(Bin i t op (Ident li False) (Ident ri False))] 
+flattenExpr (Bin i t op l@(Bin li _ _ _ _) r@(FuncCall ri _ _ _)) = (flattenExpr l) <> (flattenExpr r) <> [(Bin i t op (Ident li False) (Ident ri False))] 
+flattenExpr (Bin i t op l@(Un li _ _ _) r@(FuncCall ri _ _ _)) = (flattenExpr l) <> (flattenExpr r) <> [(Bin i t op (Ident li False) (Ident ri False))] 
+flattenExpr b@(Bin _ _ _ _ _) = [b]
+flattenExpr (Un i t op v@(Bin vi _ _ _ _)) = (flattenExpr v) <> [(Un i t op (Ident vi False))]
+flattenExpr (Un i t op v@(Un vi _ _ _)) = (flattenExpr v) <> [(Un i t op (Ident vi False))] 
+flattenExpr (Un i t op v@(FuncCall vi _ _ _)) = (flattenExpr v) <> [(Un i t op (Ident vi False))] 
+flattenExpr u@(Un _ _ _ _) = [u]
+flattenExpr (Ret v@(Bin vi _ _ _ _)) = (flattenExpr v) <> [(Ret $ Ident vi False)]
+flattenExpr (Ret v@(Un vi _ _ _)) = (flattenExpr v) <> [(Ret $ Ident vi False)]
+flattenExpr (Ret v@(FuncCall vi _ _ _)) = (flattenExpr v) <> [(Ret $ Ident vi False)]
+flattenExpr r@(Ret _) = [r]
+flattenExpr (Print v@(Bin vi _ _ _ _)) = (flattenExpr v) <> [(Print $ Ident vi False)]
+flattenExpr (Print v@(Un vi _ _ _)) = (flattenExpr v) <> [(Print $ Ident vi False)]
+flattenExpr (Print v@(FuncCall vi _ _ _)) = (flattenExpr v) <> [(Print $ Ident vi False)]
+flattenExpr r@(Print _) = [r]
+flattenExpr expr = [expr] -- TODO: cover phi and funccall cases.
 
 programToIR :: L.Program -> IR
 programToIR (L.Program funcs glbls _) = 
@@ -264,8 +297,36 @@ programToIR (L.Program funcs glbls _) =
       let
         (body', ir''') = translateBody body ir''
         body'' = patchJumps (NE.fromList body') ir'''
-        func = Fn ident args body'' ret
+        body''' = flattenBody body''
+        func = Fn ident args body''' ret
       in funcsToIR fs ir''' (func : acc)
+
+    flattenIROp :: [IROp] -> [IROp]
+    flattenIROp [] = []
+    flattenIROp (IRExpr e : is) =
+      let flattened_expr = flattenExpr e in
+      (map IRExpr flattened_expr) <> flattenIROp is
+    flattenIROp (IRVar (Variable i t e@(Bin vi _ _ _ _)) : is) =
+      let flattened_expr = flattenExpr e in
+      (map IRExpr flattened_expr) <> ((IRVar $ Variable i t (Ident vi False)) : flattenIROp is)
+    flattenIROp (IRVar (Variable i t e@(Un vi _ _ _)) : is) =
+      let flattened_expr = flattenExpr e in
+      (map IRExpr flattened_expr) <> ((IRVar $ Variable i t (Ident vi False)) : flattenIROp is)
+    flattenIROp (IRVar (Variable i t e@(FuncCall vi _ _ _)) : is) =
+      let flattened_expr = flattenExpr e in
+      (map IRExpr flattened_expr) <> ((IRVar $ Variable i t (Ident vi False)) : flattenIROp is)
+    flattenIROp (i : is) = i : flattenIROp is
+
+    flattenBody :: [CFlow] -> [CFlow]
+    flattenBody [] = []
+    flattenBody ((Lbl (Label (n, exprs))) : cs) = Lbl (Label (n, flattenIROp exprs)) : (flattenBody cs)
+    flattenBody ((BlockStmt i exprs) : cs) = BlockStmt i (flattenBody exprs) : (flattenBody cs)
+    flattenBody (IfStmt i cond main (Label (tlbl, texprs)) (Just (Label (flbl, fexprs))) : cs) =
+      -- we delay flattening the condition.
+      -- doing it now presents some cases which I think aren't solvable/would be annoying to catch (e.g. back-to-back if statements)
+      IfStmt i cond main (Label (tlbl, flattenIROp texprs)) (Just $ Label (flbl, flattenIROp fexprs)) : flattenBody cs
+    flattenBody ((IfStmt i cond main (Label (tlbl, texprs)) Nothing) : cs) =
+      IfStmt i cond main (Label (tlbl, flattenIROp texprs)) Nothing : flattenBody cs
 
 ppIR :: L.Program -> IO ()
 ppIR prog =

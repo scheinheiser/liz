@@ -47,10 +47,16 @@ data Expr = Bin T.Text L.Type L.BinaryOp Expr Expr
 
 instance Pretty Expr where
   pretty (Ident i _) = pretty @T.Text i
-  pretty (Bin i t op l r) = formatBinary i t op l r
-  pretty (Un i t op v) = formatUnary i t op v
-  pretty (Ret v) = formatPrintOrRet "ret" v
-  pretty (Print v) = formatPrintOrRet "print" v
+  pretty (Bin i t op l r) =
+    (pretty t) <+> (pretty i) 
+      <+> (pretty @T.Text "=") <+> (pretty l) 
+        <+> (pretty $ binaryToText op) <+> (pretty r)
+  pretty (Un i t op v) =
+    (pretty t) <+> (pretty i) 
+      <+> (pretty @T.Text "=") <+> (pretty $ unaryToText op) 
+        <+> (pretty v)
+  pretty (Ret v) = (pretty @T.Text "ret") <+> (pretty v)
+  pretty (Print v) = (pretty @T.Text "print") <+> (pretty v)
   pretty (Phi i t branches) = 
     (pretty t) <+> (pretty i) <+> (pretty @T.Text "=") 
         <+> (pretty @T.Text "phi") 
@@ -65,21 +71,21 @@ type IRBlock = [CFlow]
 data CFlow = IfStmt LabelIdent Expr Goto Label (Maybe Label) -- if statement id (for codegen) - cond - true branch - optional false branch
   | Lbl Label
   | BlockStmt LabelIdent IRBlock
-  | CGoto Goto
   deriving Show
 
 instance Pretty CFlow where
   pretty (IfStmt n cond gotomain truebranch falsebranch) = formatIfStmt n cond gotomain truebranch falsebranch
   pretty (Lbl lbl) = pretty lbl
-  pretty (CGoto name) = (pretty @T.Text "goto") <+> (pretty name)
   pretty (BlockStmt n exprs) =
-    (pretty @T.Text $ n <> ":") <> line <> (indent 2 . vcat $ map pretty exprs) <> line
+    (pretty @T.Text $ n <> ":") <> line <> (indent 2 . vcat $ map pretty exprs)
 
 data Variable = Variable T.Text L.Type Expr
   deriving Show
 
 instance Pretty Variable where
-  pretty (Variable i t v) = formatVar i t v
+  pretty (Variable i t v) =
+    (pretty t) <+> (pretty i) 
+      <+> (pretty @T.Text "=") <+> (pretty v)
 
 data IROp = IRExpr Expr
   | IRVar Variable
@@ -99,6 +105,9 @@ instance Pretty Fn where
       <+> (pretty @T.Text "->") <+> (viaShow retTy) 
         <> (pretty @T.Text ":") <> line 
           <> (indent 2 . vcat $ map pretty body)
+    where
+      prettifyArg :: L.Arg -> Doc ann
+      prettifyArg (L.Arg {argIdent=name, argType=ty}) = (pretty @T.Text $ name <> ":") <+> (viaShow ty)
 
 data IR = IR 
   { irFuncs            :: [Fn]
@@ -111,79 +120,6 @@ data IR = IR
   } deriving Show
 
 -- helper pretty functions
-formatVar :: T.Text -> L.Type -> Expr -> Doc ann
-formatVar ident t v@(Bin i _ _ _ _) = 
-  (pretty v) <> line 
-    <> (pretty t) <+> (pretty ident) 
-      <+> (pretty @T.Text "=") <+> (pretty i)
-formatVar ident t v@(Un i _ _ _) = 
-  (pretty v) <> line 
-    <> (pretty t) <+> (pretty ident) 
-      <+> (pretty @T.Text "=") <+> (pretty i)
-formatVar ident t v = 
-  (pretty t) <+> (pretty ident) 
-    <+> (pretty @T.Text "=") <+> (pretty v)
-
-formatBinary :: T.Text -> L.Type -> L.BinaryOp -> Expr -> Expr -> Doc ann
-formatBinary i t op l@(Bin li _ _ _ _) r@(Bin ri _ _ _ _) =
-  (pretty l) <> line 
-    <> (pretty r) <> line 
-      <> (pretty t) <+> (pretty i) 
-        <+> (pretty @T.Text "=") <+> (pretty li) 
-          <+> (pretty $ binaryToText op) <+> (pretty ri)
-formatBinary i t op l@(Un li _ _ _) r@(Bin ri _ _ _ _) =
-  (pretty l) <> line 
-    <> (pretty r) <> line 
-      <> (pretty t) <+> (pretty i) 
-        <+> (pretty @T.Text "=") <+> (pretty li) 
-          <+> (pretty $ binaryToText op) <+> (pretty ri)
-formatBinary i t op l@(Bin li _ _ _ _) r@(Un ri _ _ _) =
-  (pretty l) <> line 
-    <> (pretty r) <> line 
-      <> (pretty t) <+> (pretty i) 
-        <+> (pretty @T.Text "=") <+> (pretty li) 
-          <+> (pretty $ binaryToText op) <+> (pretty ri)
-formatBinary i t op l@(Un li _ _ _) r@(Un ri _ _ _) =
-  (pretty l) <> line 
-    <> (pretty r) <> line 
-      <> (pretty t) <+> (pretty i) 
-        <+> (pretty @T.Text "=") <+> (pretty li) 
-          <+> (pretty $ binaryToText op) <+> (pretty ri)
-formatBinary i t op l r =
-  (pretty t) <+> (pretty i) 
-    <+> (pretty @T.Text "=") <+> (pretty l) 
-      <+> (pretty $ binaryToText op) <+> (pretty r)
-
-formatUnary :: T.Text -> L.Type -> L.UnaryOp -> Expr -> Doc ann
-formatUnary i t op v@(Un vi _ _ _) =
-  (pretty v) <> line 
-    <> (pretty t) <+> (pretty i) 
-      <+> (pretty @T.Text "=") <+> (pretty $ unaryToText op) 
-        <+> (pretty vi) 
-formatUnary i t op v@(Bin vi _ _ _ _) =
-  (pretty v) <> line 
-    <> (pretty t) <+> (pretty i) 
-      <+> (pretty @T.Text "=") <+> (pretty $ unaryToText op) 
-        <+> (pretty vi) 
-formatUnary i t op v =
-  (pretty t) <+> (pretty i) 
-    <+> (pretty @T.Text "=") <+> (pretty $ unaryToText op) 
-      <+> (pretty v)
-
-formatPrintOrRet :: T.Text -> Expr -> Doc ann
-formatPrintOrRet dec v@(Bin i _ _ _ _) = 
-  (pretty v) <> line 
-    <> (pretty dec) 
-      <+> (pretty i)
-formatPrintOrRet dec v@(Un i _ _ _) = 
-  (pretty v) <> line 
-    <> (pretty dec) 
-      <+> (pretty i)
-formatPrintOrRet dec v = (pretty @T.Text dec) <+> (pretty v)
-
-prettifyArg :: L.Arg -> Doc ann
-prettifyArg (L.Arg {argIdent=name, argType=ty}) = (pretty @T.Text $ name <> ":") <+> (viaShow ty)
-
 formatIfStmt :: T.Text -> Expr -> Goto -> Label -> Maybe Label -> Doc ann
 formatIfStmt id' cond@(Bin ident _ _ _ _) gotomain lbl@(Label (gototrue, _)) Nothing =
   (pretty cond) <> line 

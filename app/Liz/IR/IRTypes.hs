@@ -39,20 +39,20 @@ data Expr = Bin T.Text L.Type L.BinaryOp Expr Expr
   | Un T.Text L.Type L.UnaryOp Expr
   | Ret Expr
   | Print Expr
-  | Phi T.Text [(LabelIdent, Expr)] -- identifier - label names + the value associated with it
+  | Phi T.Text L.Type [(LabelIdent, Expr)] -- identifier - label names + the value associated with it
   | FuncCall T.Text L.Type T.Text [Expr]
-  | Ident T.Text
+  | Ident T.Text Bool -- name, flag if it's global.
   | EVal Val
   deriving Show
 
 instance Pretty Expr where
-  pretty (Ident i) = pretty @T.Text i
+  pretty (Ident i _) = pretty @T.Text i
   pretty (Bin i t op l r) = formatBinary i t op l r
   pretty (Un i t op v) = formatUnary i t op v
   pretty (Ret v) = formatPrintOrRet "ret" v
   pretty (Print v) = formatPrintOrRet "print" v
-  pretty (Phi i branches) = 
-    (pretty i) <+> (pretty @T.Text "=") 
+  pretty (Phi i t branches) = 
+    (pretty t) <+> (pretty i) <+> (pretty @T.Text "=") 
         <+> (pretty @T.Text "phi") 
           <+> (hsep . punctuate comma $ map (\(b, r) -> (pretty b) <+> (pretty r)) branches)
   pretty (FuncCall _ _ i exprs) = 
@@ -65,13 +65,15 @@ type IRBlock = [CFlow]
 data CFlow = IfStmt LabelIdent Expr Goto Label (Maybe Label) -- if statement id (for codegen) - cond - true branch - optional false branch
   | Lbl Label
   | BlockStmt LabelIdent IRBlock
+  | CGoto Goto
   deriving Show
 
 instance Pretty CFlow where
-  pretty (IfStmt _ cond gotomain truebranch falsebranch) = formatIfStmt cond gotomain truebranch falsebranch
+  pretty (IfStmt n cond gotomain truebranch falsebranch) = formatIfStmt n cond gotomain truebranch falsebranch
   pretty (Lbl lbl) = pretty lbl
-  pretty (BlockStmt _ exprs) =
-    (pretty @T.Text "block:") <> line <> (indent 2 . vcat $ map pretty exprs)
+  pretty (CGoto name) = (pretty @T.Text "goto") <+> (pretty name)
+  pretty (BlockStmt n exprs) =
+    (pretty @T.Text $ n <> ":") <> line <> (indent 2 . vcat $ map pretty exprs) <> line
 
 data Variable = Variable T.Text L.Type Expr
   deriving Show
@@ -182,41 +184,41 @@ formatPrintOrRet dec v = (pretty @T.Text dec) <+> (pretty v)
 prettifyArg :: L.Arg -> Doc ann
 prettifyArg (L.Arg {argIdent=name, argType=ty}) = (pretty @T.Text $ name <> ":") <+> (viaShow ty)
 
-formatIfStmt :: Expr -> Goto -> Label -> Maybe Label -> Doc ann
-formatIfStmt cond@(Bin ident _ _ _ _) gotomain lbl@(Label (gototrue, _)) Nothing =
+formatIfStmt :: T.Text -> Expr -> Goto -> Label -> Maybe Label -> Doc ann
+formatIfStmt id' cond@(Bin ident _ _ _ _) gotomain lbl@(Label (gototrue, _)) Nothing =
   (pretty cond) <> line 
-    <> (pretty @T.Text "if") 
+    <> (pretty @T.Text id') 
       <+> (pretty ident) <+> (pretty @T.Text "then goto") 
         <+> (pretty gototrue) <+> (pretty @T.Text "else goto") 
           <+> (pretty gotomain) <> line 
             <> (pretty $ Lbl lbl)
-formatIfStmt cond@(Un ident _ _ _) gotomain lbl@(Label (gototrue, _)) Nothing =
+formatIfStmt id' cond@(Un ident _ _ _) gotomain lbl@(Label (gototrue, _)) Nothing =
   (pretty cond) <> line 
-    <> (pretty @T.Text "if") <+> (pretty ident) 
+    <> (pretty @T.Text id') <+> (pretty ident) 
       <+> (pretty @T.Text "then goto") <+> (pretty gototrue) 
         <+> (pretty @T.Text "else goto") <+> (pretty gotomain) 
           <> line <> (pretty $ Lbl lbl)
-formatIfStmt cond gotomain lbl@(Label (gototrue, _)) Nothing =
-  (pretty @T.Text "if") <+> (pretty cond) 
+formatIfStmt id' cond gotomain lbl@(Label (gototrue, _)) Nothing =
+  (pretty @T.Text id') <+> (pretty cond) 
     <+> (pretty @T.Text "then goto") <+> (pretty gototrue) 
       <+> (pretty @T.Text "else goto") <+> (pretty gotomain) 
         <> line <> (pretty $ Lbl lbl)
-formatIfStmt cond@(Bin ident _ _ _ _) _ tlbl@(Label (gototrue, _)) (Just (flbl@(Label (gotofalse, _)))) =
+formatIfStmt id' cond@(Bin ident _ _ _ _) _ tlbl@(Label (gototrue, _)) (Just (flbl@(Label (gotofalse, _)))) =
   (pretty cond) <> line 
-    <> (pretty @T.Text "if") <+> (pretty ident) 
+    <> (pretty @T.Text id') <+> (pretty ident) 
       <+> (pretty @T.Text "then goto") <+> (pretty gototrue) 
         <+> (pretty @T.Text "else goto") <+> (pretty gotofalse) 
           <> line <> (pretty $ Lbl tlbl) 
             <> (pretty $ Lbl flbl)
-formatIfStmt cond@(Un ident _ _ _) _ tlbl@(Label (gototrue, _)) (Just (flbl@(Label (gotofalse, _)))) =
+formatIfStmt id' cond@(Un ident _ _ _) _ tlbl@(Label (gototrue, _)) (Just (flbl@(Label (gotofalse, _)))) =
   (pretty cond) <> line 
-    <> (pretty @T.Text "if") <+> (pretty ident) 
+    <> (pretty @T.Text id') <+> (pretty ident) 
       <+> (pretty @T.Text "then goto") <+> (pretty gototrue) 
         <+> (pretty @T.Text "else goto") <+> (pretty gotofalse) 
           <> line <> (pretty $ Lbl tlbl) 
             <> (pretty $ Lbl flbl)
-formatIfStmt cond _ tlbl@(Label (gototrue, _)) (Just (flbl@(Label (gotofalse, _)))) =
-  (pretty @T.Text "if") <+> (pretty cond) 
+formatIfStmt id' cond _ tlbl@(Label (gototrue, _)) (Just (flbl@(Label (gotofalse, _)))) =
+  (pretty @T.Text id') <+> (pretty cond) 
     <+> (pretty @T.Text "then goto") <+> (pretty gototrue) 
       <+> (pretty @T.Text "else goto") <+> (pretty gotofalse) 
         <> line <> (pretty $ Lbl tlbl) 

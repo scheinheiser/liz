@@ -19,16 +19,13 @@ import Prettyprinter.Render.Text (putDoc)
 labelSuffix :: Int -> T.Text
 labelSuffix index = "L" <> (T.show index)
 
-pushExpr :: Label -> IROp -> Label
-pushExpr (Label (n, exprs)) instr = Label (n, instr : exprs)
-
 translateBody :: [L.SExpr] -> IR -> ([CFlow], IR)
 translateBody l ir@IR{irCFlowIdx=i} = aux l ir{irCFlowIdx=i+1} (Label (labelSuffix i, [])) []
   where
     aux :: [L.SExpr] -> IR -> Label -> [CFlow] -> ([CFlow], IR)
     aux [] ir' lbl@(Label (_, exprs)) acc = 
-      if length exprs /= 0 then (Lbl lbl : acc, ir)
-                           else (acc, ir)
+      if length exprs /= 0 then (Lbl lbl : acc, ir')
+                           else (acc, ir')
     aux (sexpr : rest) ir' lbl acc =
       let (flow, ir'', lbl') = fromSExpr sexpr ir' lbl in
       aux rest ir'' lbl' (acc <> flow)
@@ -55,7 +52,7 @@ getType m (Un _ _ op v) =
     _ -> getType m v
 getType _ (Print _) = L.Unit'
 getType m (Ret v) = getType m v
-getType m (Ident i) = m M.! i
+getType m (Ident i _) = m M.! i
 getType m (FuncCall _ _ i _) = m M.! i
 getType _ e = error $ "called getType with unexpected expr: " <> (show e)
 
@@ -64,9 +61,11 @@ fromSExpr :: L.SExpr -> IR -> Label -> ([CFlow], IR, Label)
 fromSExpr (L.SEExpr ex) ir (Label (n, exprs)) =
   let (ex', ir') = fromExpr ex ir in
   ([], ir', Label (n, (IRExpr ex') : exprs))
-fromSExpr (L.SEFlow flow) ir old_lbl =
+fromSExpr (L.SEFlow flow) ir old_lbl@(Label (_, exprs)) =
   let (ex', ir'@IR{irCFlowIdx=i}) = fromCFlow flow ir in
-  ([Lbl old_lbl, ex'], ir'{irCFlowIdx=i + 1}, Label (labelSuffix i, []))
+  if length exprs /= 0 
+  then ([Lbl old_lbl, ex'], ir'{irCFlowIdx=i + 1}, Label (labelSuffix i, []))
+  else ([ex'], ir'{irCFlowIdx=i + 1}, Label (labelSuffix i, []))
 fromSExpr (L.SEVar _ L.Var{varIdent = ident, varType = t, varValue = v}) ir (Label (n, exprs)) =
   let 
     (v', ir'@IR{irSymbols=symmap}) = fromExpr v ir 
@@ -91,29 +90,30 @@ fromSExpr (L.SEConst _ L.Var{varIdent = ident, varType = t, varValue = v}) ir@IR
 fromCFlow :: L.ControlFlow -> IR -> (CFlow, IR)
 fromCFlow (L.FIfStmt _ cond tbranch Nothing) ir@IR{irCFlowIdx=fi} =
   let 
-    flowidx = "IFSTMT" <> (T.show fi)
+    flowidx = "if%" <> (T.show fi)
     (cond', ir') = fromExpr cond ir
     (_, ir'', tlbl) = fromSExpr tbranch ir' (Label (labelSuffix fi, []))
     gotomain = "blank" -- blank goto because labels haven't been applied to the rest.
   in (IfStmt flowidx cond' gotomain tlbl Nothing, ir''{irCFlowIdx=fi + 1})
 fromCFlow (L.FIfStmt _ cond tbranch (Just fbranch)) ir@IR{irCFlowIdx=fi} =
   let 
-    flowidx = "IFSTMT" <> (T.show fi)
+    flowidx = "if%" <> (T.show fi)
     (cond', ir') = fromExpr cond ir
     (_, ir'', tlbl) = fromSExpr tbranch ir' (Label (labelSuffix fi, []))
     (_, ir''', flbl) = fromSExpr fbranch ir'' (Label (labelSuffix $ fi + 1, []))
-    -- label = "L"
     gotomain = "blank"
   in (IfStmt flowidx cond' gotomain tlbl (Just flbl), ir'''{irCFlowIdx=fi + 2})
 fromCFlow (L.FBlockStmt _ vals) ir@IR{irCFlowIdx=fi} =
   let 
-    flowidx = "BLOCK" <> (T.show fi)
+    flowidx = "block%" <> (T.show fi)
     (body, ir') = translateBody vals ir
   in
   (BlockStmt flowidx body, ir'{irCFlowIdx=fi + 1})
 
 fromExpr :: L.Expression -> IR -> (Expr, IR)
-fromExpr (L.EIdentifier ident _) ir = (Ident ident, ir)
+fromExpr (L.EIdentifier ident _) ir@IR{irGlbls=glbls} = 
+  if any (ident ==) (map (\(Variable n _ _) -> n) glbls) then (Ident ident True, ir)
+                                                         else (Ident ident False, ir)
 fromExpr (L.EBinary op _ l r) ir = 
   let
     (l', ir') = fromExpr l ir
@@ -181,47 +181,63 @@ fromExpr (L.EFuncCall _ ident params) ir@IR{irSymbols=symmap, irTempVarIdx=i} =
           let (ex, ir'') = fromExpr p ir' in 
           ((ir'', ex : acc), p)) (ir, []) params 
     temp_i = tempVarIdent i
-    ty = getType symmap (Ident ident)
+    ty = getType symmap (Ident ident False)
   in
   (FuncCall temp_i ty ident params', ir'''{irTempVarIdx=i + 1})
 
 -- FIX: detect if there's nested if statements
-patchJumps :: NE.NonEmpty CFlow -> [CFlow]
+patchJumps :: NE.NonEmpty CFlow -> IR -> [CFlow]
 patchJumps = aux . NE.toList
   where
-    aux :: [CFlow] -> [CFlow]
-    aux [] = []
-    aux [(IfStmt id' cond _ (Label (gototrue, exprs)) Nothing)] =
+    aux :: [CFlow] -> IR -> [CFlow]
+    aux [] _ = []
+    aux (stmt : rest@((IfStmt n _ _ _ _) : _)) ir = (patchCFlow stmt n) : (aux rest ir)
+    aux (stmt : rest@((Lbl (Label (n, _))) : _)) ir = (patchCFlow stmt n) : (aux rest ir)
+    aux (stmt : rest@((BlockStmt n _) : _)) ir = (patchCFlow stmt n) : (aux rest ir)
+    aux [(IfStmt id' cond _ (Label (gototrue, exprs)) Nothing)] IR{irSymbols=symmap} =
       let 
         lastE = getLast $ last exprs
-        endlbl = Lbl $ Label ("end", [IRExpr $ Phi "res" [(gototrue, lastE)]])
+        endlbl = 
+          if (getType symmap lastE) == L.Unit' 
+          then Lbl $ Label ("end", [IRExpr $ Ret (EVal Unt)])
+          else Lbl $ Label ("end", [(IRExpr $ Phi "res" (getType symmap lastE) [(gototrue, lastE)]), (IRExpr $ Ret (Ident "res" False))])
         patched_exprs = exprs <> [IRGoto "end"] 
       in
       (IfStmt id' cond "end" (Label (gototrue, patched_exprs)) Nothing) : endlbl : []
-    aux [(IfStmt id' cond _ (Label (gototrue, texprs)) (Just (Label (gotofalse, fexprs))))] =
+    aux [(IfStmt id' cond _ (Label (gototrue, texprs)) (Just (Label (gotofalse, fexprs))))] IR{irSymbols=symmap} =
       let 
         (lastT, lastF) = (getLast $ last texprs, getLast $ last fexprs)
-        endlbl = Lbl $ Label ("end", [(IRExpr $ Phi "res" [(gototrue, lastT), (gotofalse, lastF)]), (IRExpr $ Ret (Ident "res"))])
+        endlbl = 
+          if (getType symmap lastT) == L.Unit'
+          then Lbl $ Label ("end", [IRExpr $ Ret (EVal Unt)])
+          else Lbl $ Label ("end", [(IRExpr $ Phi "res" (getType symmap lastT) [(gototrue, lastT), (gotofalse, lastF)]), (IRExpr $ Ret (Ident "res" False))])
         patched_texprs = texprs <> [IRGoto "end"] 
         patched_fexprs = fexprs <> [IRGoto "end"] 
       in
       (IfStmt id' cond "end" (Label (gototrue, patched_texprs)) (Just (Label (gotofalse, patched_fexprs)))) : endlbl : []
-    aux ((IfStmt id' cond _ (Label (gototrue, exprs)) Nothing) : next@(Lbl (Label (n, _))) : rest) =
-      let patched_exprs = exprs <> [IRGoto n] in
-      (IfStmt id' cond n (Label (gototrue, patched_exprs)) Nothing) : next : (aux rest)
-    aux ((IfStmt id' cond _ (Label (gototrue, texprs)) (Just (Label (gotofalse, fexprs)))) : next@(Lbl ((Label (n, _)))) : rest) =
-      let 
-        patched_texprs = texprs <> [IRGoto n] 
-        patched_fexprs = fexprs <> [IRGoto n] 
-      in
-      (IfStmt id' cond n (Label (gototrue, patched_texprs)) (Just (Label (gotofalse, patched_fexprs)))) : next : (aux rest) 
-    aux (expr : rest) = expr : aux rest
+    aux (expr : rest) ir = expr : aux rest ir
 
-    getLast :: IROp -> Expr
-    getLast (IRExpr (Bin i _ _ _ _)) = Ident i
-    getLast (IRExpr (Un i _ _ _)) = Ident i
+    patchCFlow :: CFlow -> T.Text -> CFlow
+    patchCFlow (IfStmt id' cond _ (Label (gototrue, exprs)) Nothing) next =
+      let patched_exprs = exprs <> [IRGoto next] in
+      (IfStmt id' cond next (Label (gototrue, patched_exprs)) Nothing)
+    patchCFlow (IfStmt id' cond _ (Label (gototrue, texprs)) (Just (Label (gotofalse, fexprs)))) next =
+      let 
+        patched_texprs = texprs <> [IRGoto next] 
+        patched_fexprs = fexprs <> [IRGoto next] 
+      in (IfStmt id' cond next (Label (gototrue, patched_texprs)) (Just (Label (gotofalse, patched_fexprs))))
+    patchCFlow (BlockStmt id' exprs) next =
+      let patched_exprs = exprs <> [CGoto next] in
+      (BlockStmt id' patched_exprs)
+    patchCFlow (Lbl (Label (n, exprs))) next =
+      let patched_exprs = exprs <> [IRGoto next] in
+      (Lbl $ Label (n, patched_exprs))
+
+    getLast :: IROp -> Expr 
+    getLast (IRExpr (Bin i _ _ _ _)) = Ident i False
+    getLast (IRExpr (Un i _ _ _)) = Ident i False
     getLast (IRExpr op@(FuncCall _ _ _ _)) = op
-    getLast (IRVar (Variable i _ _)) = Ident i
+    getLast (IRVar (Variable i _ _)) = Ident i False
     getLast (IRExpr ret@(Ret _)) = ret
     getLast (IRExpr (Print _)) = EVal Unt
     getLast v = error $ "\nMalformed IR -\n  " <> (show v)
@@ -247,7 +263,7 @@ programToIR (L.Program funcs glbls _) =
     funcsToIR ((L.Func ident _ args ret body) : fs) ir'' acc =
       let
         (body', ir''') = translateBody body ir''
-        body'' = patchJumps $ NE.fromList body'
+        body'' = patchJumps (NE.fromList body') ir'''
         func = Fn ident args body'' ret
       in funcsToIR fs ir''' (func : acc)
 

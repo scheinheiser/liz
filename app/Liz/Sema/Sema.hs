@@ -127,7 +127,6 @@ inferExpr (L.EReturn _ v) env = inferExpr v env
 inferExpr (L.EPrint _ _) env = (Right L.Unit', env)
 inferExpr (L.EFuncCall range iden args) env = inferFuncCall range iden args env
 inferExpr (L.EIdentifier iden range) env = inferIdentifier range iden env
-inferExpr expr _ = error $ "failed with " <> (show expr)
 
 inferIdentifier :: L.LizRange -> T.Text -> Env -> (Either [E.SemErr] L.Type, Env)
 inferIdentifier range iden env@(Env {envFuncs=fenv, envVars=venv, envConsts=cenv}) =

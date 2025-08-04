@@ -50,6 +50,8 @@ prettifyErr expr fp ftext =
     RecursiveMacroDef range i -> formatError fp (Just range) (T.pack $ printf "'%s' is a recursive macro definition." i) Nothing (Just $ sliceFile ftext range)
     NonGlblMacroDef range -> formatError fp (Just range) "Invalid declaration of macro." (Just "Macros can only be defined locally.") (Just $ sliceFile ftext range)
     InvalidBinaryExpr range -> formatError fp (Just range) "Invalid binary expression." Nothing (Just $ sliceFile ftext range)
+    InvalidUnaryExpr range -> formatError fp (Just range) "Invalid unary expression." Nothing (Just $ sliceFile ftext range)
+    InvalidIfStmt range -> formatError fp (Just range) "Invalid if statement" Nothing (Just $ sliceFile ftext range)
   where
     formatError :: FilePath -> Maybe LizRange -> T.Text -> Maybe T.Text -> Maybe T.Text -> [C.Chunk]
     formatError f (Just range) errtxt (Just hinttxt) (Just slice) = (filePrefixWithLoc f range) <> errorPrefix <> (errorText errtxt) <> (hintText hinttxt) <> slicePrefix <> (sliceText slice)

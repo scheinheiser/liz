@@ -394,7 +394,7 @@ parseFile f fc = do
     (Right (Program funcs glbls macros)) -> Right $ Program (map aux funcs) glbls macros
   where
     aux :: Func -> Func
-    aux fn@Func{funcBody=body} = fn{funcBody = removeComments body}
+    aux fn@Func{funcBody=body} = fn{funcBody = reverse $ removeComments body}
 
     removeComments :: [SExpr] -> [SExpr]
     removeComments [] = []

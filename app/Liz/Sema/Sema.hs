@@ -145,6 +145,7 @@ inferIdentifier range iden env@(Env {envFuncs=fenv, envVars=venv, envConsts=cenv
     aux r i False False False = (Left $ [E.UndefinedIdentifier r i], env)
 
 checkUnary :: L.LizRange -> L.UnaryOp -> L.Expression -> Env -> (Either [E.SemErr] L.Type, Env)
+checkUnary range _ (L.EReturn _ _) env = (Left [E.InvalidUnaryExpr range], env)
 checkUnary range op v env =
   case (inferExpr v env) of
     err@((Left _), _) -> err
@@ -231,16 +232,15 @@ inferFunc (L.Func{..}) env@(Env{..})
       argTypeErrs = 
         lefts $ foldMap (\L.Arg{..} -> if argType == L.Unit' then [Left (E.InvalidArgType funcPos argIdent argType)] else [Right ()]) funcArgs
       envWithArgs = flip addArgs env $ map (\L.Arg{..} -> (argIdent, argType)) funcArgs
-      result = inferBody funcBody envWithArgs
-      errsAndTypes = collectErrors result
+      errsAndTypes = collectErrors $ inferBody funcBody envWithArgs
     in aux errsAndTypes funcReturnType argTypeErrs
   where
     aux (errs, types) ret aterrs =
       case () of _
                   | length aterrs /= 0 && length errs /= 0 && last types /= ret -> (Left $ (E.IncorrectType funcPos ret (last types)) : aterrs <> errs, env)
                   | length errs /= 0 && length aterrs /= 0 -> (Left $ aterrs <> errs, env)
-                  | last types /= ret && length aterrs /= 0 -> (Left $ [E.IncorrectType funcPos ret (last types)] <> aterrs, env)
-                  | last types /= ret && length errs /= 0 -> (Left $ [E.IncorrectType funcPos ret (last types)] <> errs, env)
+                  | length aterrs /= 0 && last types /= ret -> (Left $ [E.IncorrectType funcPos ret (last types)] <> aterrs, env)
+                  | length errs /= 0 && last types /= ret -> (Left $ [E.IncorrectType funcPos ret (last types)] <> errs, env)
                   | length errs /= 0 -> (Left errs, env)
                   | length aterrs /= 0 -> (Left aterrs, env)
                   | last types /= ret -> (Left $ [E.IncorrectType funcPos ret (last types)], env)
@@ -289,6 +289,7 @@ inferFuncCall range ident sexprs env@(Env{..})
                                | otherwise = findWrongTypes xs ys
 
 inferIfStmt :: L.LizRange -> L.Expression -> L.SExpr -> Maybe L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
+inferIfStmt range (L.EReturn _ _) _ _ env = (Left [E.InvalidIfStmt range], env)
 inferIfStmt range cond tbranch Nothing env =
   case (inferExpr cond env, infer tbranch env) of
     ((Left ecs, _), (Left ets, env')) -> (Left $ ecs <> ets, env')

@@ -12,6 +12,8 @@ import Prettyprinter
 import Prettyprinter.Render.Text (renderStrict)
 import Data.Word
 
+-- made with reference of https://hackage.haskell.org/package/qbe-1.1.0.0
+
 data Sigil = AT -- aggregate types
   | Global
   | Temp 
@@ -341,8 +343,8 @@ data Block = Block (Ident Label) [Instr]
 instance Pretty Block where
   pretty (Block n exprs) = (pretty n) <> line <> (indent 8 . vsep $ map pretty exprs)
 
-data Param = RegularParam (Ident Temp) AbiTy
-  | EnvParam (Ident Temp)
+data Param = RegularParam Value AbiTy
+  | EnvParam Value
   | VariadicParam
 
 instance Pretty Param where

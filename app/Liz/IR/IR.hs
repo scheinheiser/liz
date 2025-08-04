@@ -23,8 +23,8 @@ translateBody :: [L.SExpr] -> IR -> ([CFlow], IR)
 translateBody l ir@IR{irCFlowIdx=i} = aux l ir{irCFlowIdx=i+1} (Label (labelSuffix i, [])) []
   where
     aux :: [L.SExpr] -> IR -> Label -> [CFlow] -> ([CFlow], IR)
-    aux [] ir' lbl@(Label (_, exprs)) acc = 
-      if length exprs /= 0 then (Lbl lbl : acc, ir')
+    aux [] ir' (Label (n, exprs)) acc = 
+      if length exprs /= 0 then (Lbl (Label (n, reverse exprs)) : acc, ir')
                            else (acc, ir')
     aux (sexpr : rest) ir' lbl acc =
       let (flow, ir'', lbl') = fromSExpr sexpr ir' lbl in
@@ -90,14 +90,14 @@ fromSExpr (L.SEConst _ L.Var{varIdent = ident, varType = t, varValue = v}) ir@IR
 fromCFlow :: L.ControlFlow -> IR -> (CFlow, IR)
 fromCFlow (L.FIfStmt _ cond tbranch Nothing) ir@IR{irCFlowIdx=fi} =
   let 
-    flowidx = "if%" <> (T.show fi)
+    flowidx = "if$" <> (T.show fi)
     (cond', ir') = fromExpr cond ir
     (_, ir'', tlbl) = fromSExpr tbranch ir' (Label (labelSuffix fi, []))
     gotomain = "blank" -- blank goto because labels haven't been applied to the rest.
   in (IfStmt flowidx cond' gotomain tlbl Nothing, ir''{irCFlowIdx=fi + 1})
 fromCFlow (L.FIfStmt _ cond tbranch (Just fbranch)) ir@IR{irCFlowIdx=fi} =
   let 
-    flowidx = "if%" <> (T.show fi)
+    flowidx = "if$" <> (T.show fi)
     (cond', ir') = fromExpr cond ir
     (_, ir'', tlbl) = fromSExpr tbranch ir' (Label (labelSuffix fi, []))
     (_, ir''', flbl) = fromSExpr fbranch ir'' (Label (labelSuffix $ fi + 1, []))
@@ -105,7 +105,7 @@ fromCFlow (L.FIfStmt _ cond tbranch (Just fbranch)) ir@IR{irCFlowIdx=fi} =
   in (IfStmt flowidx cond' gotomain tlbl (Just flbl), ir'''{irCFlowIdx=fi + 2})
 fromCFlow (L.FBlockStmt _ vals) ir@IR{irCFlowIdx=fi} =
   let 
-    flowidx = "block%" <> (T.show fi)
+    flowidx = "block$" <> (T.show fi)
     (body, ir') = translateBody vals ir
   in
   (BlockStmt flowidx body, ir'{irCFlowIdx=fi + 1})
@@ -298,7 +298,7 @@ programToIR (L.Program funcs glbls _) =
         (body', ir''') = translateBody body ir''
         body'' = patchJumps (NE.fromList body') ir'''
         body''' = flattenBody body''
-        func = Fn ident args body''' ret
+        func = Fn ident args (body''') ret
       in funcsToIR fs ir''' (func : acc)
 
     flattenIROp :: [IROp] -> [IROp]
@@ -306,15 +306,11 @@ programToIR (L.Program funcs glbls _) =
     flattenIROp (IRExpr e : is) =
       let flattened_expr = flattenExpr e in
       (map IRExpr flattened_expr) <> flattenIROp is
-    flattenIROp (IRVar (Variable i t e@(Bin vi _ _ _ _)) : is) =
+    flattenIROp (IRVar (Variable i t (e@((Bin _ _ _ _ _);(Un _ _ _ _);(FuncCall _ _ _ _)))) : is) =
       let flattened_expr = flattenExpr e in
-      (map IRExpr flattened_expr) <> ((IRVar $ Variable i t (Ident vi False)) : flattenIROp is)
-    flattenIROp (IRVar (Variable i t e@(Un vi _ _ _)) : is) =
-      let flattened_expr = flattenExpr e in
-      (map IRExpr flattened_expr) <> ((IRVar $ Variable i t (Ident vi False)) : flattenIROp is)
-    flattenIROp (IRVar (Variable i t e@(FuncCall vi _ _ _)) : is) =
-      let flattened_expr = flattenExpr e in
-      (map IRExpr flattened_expr) <> ((IRVar $ Variable i t (Ident vi False)) : flattenIROp is)
+      if length flattened_expr > 1 
+      then (map IRExpr $ init flattened_expr) <> ((IRVar $ Variable i t (last flattened_expr)) : flattenIROp is)
+      else ((IRVar $ Variable i t (last flattened_expr)) : flattenIROp is)
     flattenIROp (i : is) = i : flattenIROp is
 
     flattenBody :: [CFlow] -> [CFlow]

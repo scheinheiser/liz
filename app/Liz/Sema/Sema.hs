@@ -32,7 +32,7 @@ inferBody exprs env =
   snd . fst $ mapAccumL 
     (\(env', acc) expr -> 
       let (expr', env'') = infer expr env' in 
-      ((env'', expr' : acc), env'')) (env, []) exprs
+      ((env'', expr' : acc), env'')) (env, []) (reverse exprs)
 
 analyseAndPrintErrs :: L.Program -> FilePath -> String -> IO ()
 analyseAndPrintErrs prog f ftext =
@@ -69,10 +69,13 @@ analyseAndPrintErrs prog f ftext =
 
     inferFuncs :: [L.Func] -> Env -> Int -> [Either [E.SemErr] L.Type] -> ([E.SemErr], Int)
     inferFuncs [] _ i acc = (fold $ lefts acc, i)
-    inferFuncs (fn@L.Func{funcIdent=ident} : fs) env i acc =
-      let (result, env') = inferFunc fn env in
-      if ident == "main" then inferFuncs fs env' (i + 1) (result : acc)
-                         else inferFuncs fs env' i (result : acc)
+    inferFuncs (fn@L.Func{funcIdent="main", funcReturnType=ret} : fs) env i acc =
+      let (result, env') = inferFunc fn env in 
+      inferFuncs fs env' (i + 1) (result : acc)
+      -- if ret /= L.Int' then inferFuncs fs env' (i + 1) (result : acc)
+      --                  else inferFuncs fs env' (i + 1) (Left [E.NonIntEntryPoint] : result : acc)
+    inferFuncs (fn : fs) env i acc =
+      let (result, env') = inferFunc fn env in inferFuncs fs env' i (result : acc)
 
 -- TODO: Allow declarations in any order.
 analyseProgram :: L.Program -> Either [E.SemErr] L.Program
@@ -239,8 +242,8 @@ inferFunc (L.Func{..}) env@(Env{..})
       case () of _
                   | length aterrs /= 0 && length errs /= 0 && last types /= ret -> (Left $ (E.IncorrectType funcPos ret (last types)) : aterrs <> errs, env)
                   | length errs /= 0 && length aterrs /= 0 -> (Left $ aterrs <> errs, env)
-                  | length aterrs /= 0 && last types /= ret -> (Left $ [E.IncorrectType funcPos ret (last types)] <> aterrs, env)
-                  | length errs /= 0 && last types /= ret -> (Left $ [E.IncorrectType funcPos ret (last types)] <> errs, env)
+                  -- | length aterrs /= 0 && last types /= ret -> (Left $ [E.IncorrectType funcPos ret (last types)] <> aterrs, env)
+                  -- | length errs /= 0 && last types /= ret -> (Left $ [E.IncorrectType funcPos ret (last types)] <> errs, env)
                   | length errs /= 0 -> (Left errs, env)
                   | length aterrs /= 0 -> (Left aterrs, env)
                   | last types /= ret -> (Left $ [E.IncorrectType funcPos ret (last types)], env)

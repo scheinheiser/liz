@@ -28,6 +28,7 @@ data SemErr = IncorrectType LizRange Type Type -- expected type ; given type
   | InvalidBinaryExpr LizRange
   | InvalidUnaryExpr LizRange
   | InvalidIfStmt LizRange
+  | NonIntEntryPoint
   deriving (Show, Eq)
 
 data PError = FailedTypeInference T.Text

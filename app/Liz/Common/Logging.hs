@@ -52,6 +52,7 @@ prettifyErr expr fp ftext =
     InvalidBinaryExpr range -> formatError fp (Just range) "Invalid binary expression." Nothing (Just $ sliceFile ftext range)
     InvalidUnaryExpr range -> formatError fp (Just range) "Invalid unary expression." Nothing (Just $ sliceFile ftext range)
     InvalidIfStmt range -> formatError fp (Just range) "Invalid if statement" Nothing (Just $ sliceFile ftext range)
+    NonIntEntryPoint -> formatError fp Nothing "Return type of entry point must be 'Int'." Nothing Nothing
   where
     formatError :: FilePath -> Maybe LizRange -> T.Text -> Maybe T.Text -> Maybe T.Text -> [C.Chunk]
     formatError f (Just range) errtxt (Just hinttxt) (Just slice) = (filePrefixWithLoc f range) <> errorPrefix <> (errorText errtxt) <> (hintText hinttxt) <> slicePrefix <> (sliceText slice)

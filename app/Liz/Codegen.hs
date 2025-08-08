@@ -2,7 +2,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OrPatterns #-}
 
-module Liz.Codegen where
+module Liz.Codegen (ppQBE, irToQBE) where
 
 import qualified Liz.Common.Types as CT
 import qualified Liz.QBE.QBE as Q
@@ -27,24 +27,11 @@ typeToPrim CT.Char' = Q.PrimWord
 typeToPrim CT.String' = Q.PrimLong
 typeToPrim CT.Unit' = error "Attempted conversion of unit to primitive in codegen."
 
-valueToConst :: Val -> Q.Const
-valueToConst (Integ i) =
-  if i < 0 then Q.CInt True (unsafeCoerce $ abs i)
-           else Q.CInt False (unsafeCoerce i)
-valueToConst (Flt f) = Q.CFloat f
-valueToConst (Bln b) = Q.CInt False (toInt b)
-  where
-    toInt :: Bool -> Word64
-    toInt True = 1 
-    toInt False = 0
-valueToConst (Chr c) = Q.CInt False (unsafeCoerce $ ord c)
-valueToConst (Str s _) = Q.CGlobal (Q.Ident @Q.Global s)
-
 fromBasicExpr :: Expr -> Q.Value
 fromBasicExpr (Ident n isGlobal) = 
   if isGlobal then Q.VConst $ Q.CGlobal (Q.Ident @Q.Global n) 
               else Q.VTemp $ Q.Ident @Q.Temp n
-fromBasicExpr (EVal (Str _ s)) = Q.VConst $ Q.CGlobal (Q.Ident @Q.Global s)
+fromBasicExpr (EVal (Str s _)) = Q.VConst $ Q.CGlobal (Q.Ident @Q.Global s)
 fromBasicExpr (EVal (Integ i)) = 
   if i < 0 then Q.VConst $ Q.CInt True (unsafeCoerce $ abs i)
            else Q.VConst $ Q.CInt False (unsafeCoerce i)
@@ -56,6 +43,9 @@ fromBasicExpr (EVal (Bln b)) = Q.VConst $ Q.CInt False (toInt b)
     toInt False = 0
 fromBasicExpr (EVal (Chr c)) = Q.VConst $ Q.CInt False (unsafeCoerce $ ord c)
 fromBasicExpr _ = error "Internal error - nested expressions must be flattened." -- should be unreachable
+
+ppQBE :: Q.Program -> IO ()
+ppQBE = putDoc . pretty
 
 irToQBE :: IR -> Q.Program
 irToQBE (IR funcs glbls strs _ _ _ _) =
@@ -73,6 +63,19 @@ irToQBE (IR funcs glbls strs _ _ _ _) =
     fromGlblValue (EVal v) = Q.DIConst $ valueToConst v
     fromGlblValue (Ident i _) = Q.DIConst $ Q.CGlobal (Q.Ident @Q.Global i) 
     fromGlblValue _ = error "Internal error - cannot have expressions within a global variable." -- should be unreachable
+
+    valueToConst :: Val -> Q.Const
+    valueToConst (Integ i) =
+      if i < 0 then Q.CInt True (unsafeCoerce $ abs i)
+               else Q.CInt False (unsafeCoerce i)
+    valueToConst (Flt f) = Q.CFloat f
+    valueToConst (Bln b) = Q.CInt False (toInt b)
+      where
+        toInt :: Bool -> Word64
+        toInt True = 1 
+        toInt False = 0
+    valueToConst (Chr c) = Q.CInt False (unsafeCoerce $ ord c)
+    valueToConst (Str s _) = Q.CGlobal (Q.Ident @Q.Global s)
 
     funcToQBE :: Fn -> Q.FuncDef
     funcToQBE (Fn ident args body ret) =
@@ -96,9 +99,6 @@ irToQBE (IR funcs glbls strs _ _ _ _) =
             -- a unit arg would cause a semantic error, and so isn't a concern here.
             argType' = Q.AbiPrim $ typeToPrim argType
           in (Q.RegularParam argIdent' argType') : argsToQBE as
-
-ppQBE :: Q.Program -> IO ()
-ppQBE = putDoc . pretty
 
 fromCFlow :: CFlow -> [Q.Block]
 fromCFlow (Lbl (Label (i, body))) =
@@ -162,13 +162,18 @@ fromIROp (IRVar (Variable i t (Ident ident isGlobal))) =
     ident' = 
       if isGlobal then Q.VConst $ Q.CGlobal (Q.Ident @Q.Global ident)
                   else Q.VTemp $ Q.Ident @Q.Temp ident
-  in [Q.Load i' (Q.ExtPrim t') ident']
-fromIROp (IRVar (Variable _ _ (EVal _))) = error "figure out value assignment"
+  in [Q.Unary i' Q.Copy ident']
+fromIROp (IRVar (Variable i t v@(EVal _))) =
+  let
+    t' = typeToPrim t
+    i' = Q.Assignment (Q.Ident @Q.Temp i) (Q.AbiPrim t')
+    v' = fromBasicExpr v
+  in [Q.Unary i' Q.Copy v']
 fromIROp (IRVar _) = error "Internal error - there shouldn't be return/print/phi in variable."
 
 fromExpr :: Expr -> [Q.Instr]
 fromExpr (Ret v) = [Q.Jump $ Q.Ret (Just $ fromBasicExpr v)]
-fromExpr (Print v) = [Q.Call Nothing (Q.Ident @Q.Global "printf") undefined]
+fromExpr (Print v) = [Q.Call Nothing (Q.Ident @Q.Global "printf") [Q.RegularParam (fromBasicExpr v) (Q.AbiPrim Q.PrimLong)]]
 fromExpr (Bin ident ty operator left right) = formatBinary ident ty operator left right
   where 
     formatBinary :: T.Text -> CT.Type -> CT.BinaryOp -> Expr -> Expr -> [Q.Instr]
@@ -186,10 +191,22 @@ fromExpr (Bin ident ty operator left right) = formatBinary ident ty operator lef
     binaryToQBE CT.Subtract _ = Q.Sub
     binaryToQBE CT.Multiply _ = Q.Mul
     binaryToQBE CT.Divide _ = Q.Div
-    binaryToQBE CT.Greater t = Q.CGt t
-    binaryToQBE CT.Less t = Q.CLt t
-    binaryToQBE CT.GreaterEql t = Q.CGe t
-    binaryToQBE CT.LessEql t = Q.CLe t
+    binaryToQBE CT.Greater t = 
+      case t of
+        Q.PrimWord;Q.PrimLong -> Q.CSge t
+        Q.PrimSingle;Q.PrimDouble -> Q.CGt t
+    binaryToQBE CT.Less t =
+      case t of
+        Q.PrimWord;Q.PrimLong -> Q.CSlt t
+        Q.PrimSingle;Q.PrimDouble -> Q.CLt t
+    binaryToQBE CT.GreaterEql t =
+      case t of
+        Q.PrimWord;Q.PrimLong -> Q.CSge t
+        Q.PrimSingle;Q.PrimDouble -> Q.CGe t
+    binaryToQBE CT.LessEql t =
+      case t of
+        Q.PrimWord;Q.PrimLong -> Q.CSle t
+        Q.PrimSingle;Q.PrimDouble -> Q.CLe t
     binaryToQBE CT.Eql t = Q.CEq t
     binaryToQBE CT.NotEql t = Q.CNe t
     binaryToQBE CT.Concat _ = error "figure out concat operator."

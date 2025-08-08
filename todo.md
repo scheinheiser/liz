@@ -18,6 +18,7 @@
 - [x] Pretty errors.
 - [x] Macro substitution
 - [ ] Allow declarations in any order.
+- [ ] Insert returns in functions.
 
 ## IR
 - [x] Decide on block-style or label-style IR.
@@ -28,6 +29,6 @@
 ## Codegen
 - [x] Decide between using LLVM or asm for IL. (using QBE instead)
 - [x] Make a QBE pretty printing library.
-- [ ] Compile simple expressions (i.e. arithmetic, boolean stuff).
+- [x] Compile simple expressions (i.e. arithmetic, boolean stuff).
 - [ ] Compile complex expressions (i.e. nested stuff, functions).
 - [ ] Compile and run the first working liz executable!

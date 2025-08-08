@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NamedDefaults #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE PatternGuards #-}
 
 module Liz.Parser where
 
@@ -58,9 +59,8 @@ scn = L.space space1 (void $ spaceChar <|> tab) empty
 lizReserved :: [T.Text]
 lizReserved = 
   [ "var", "set", "const", "if", "def", "return", "False",
-    "True", "not", "negate", "Int", "Float", 
-    "String", "Char", "Bool", "Unit", "print", "block",
-    "macro"]
+    "True", "not", "negate", "Int", "Float", "String", 
+    "Char", "Bool", "Unit", "print", "block", "macro"]
 
 lizSymbols :: Parser Char
 lizSymbols = choice
@@ -368,7 +368,7 @@ parseSExpr = (between (char '(') (char ')') $
 
 parseProgram :: Parser Program
 parseProgram = do
-  res <- some $ try $ scn >> aux
+  res <- some $ scn >> aux
   pure $ fold res
   where
     aux :: Parser Program

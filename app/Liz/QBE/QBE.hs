@@ -12,7 +12,7 @@ import Prettyprinter
 import Prettyprinter.Render.Text (renderStrict)
 import Data.Word
 
--- made with reference of https://hackage.haskell.org/package/qbe-1.1.0.0
+-- made using https://hackage.haskell.org/package/qbe-1.1.0.0 as a reference
 
 data Sigil = AT -- aggregate types
   | Global

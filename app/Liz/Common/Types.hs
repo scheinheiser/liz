@@ -52,7 +52,6 @@ data Arg = Arg
   , argType   :: Type
   } deriving (Show, Eq)
 
-
 data Var = Var
   { varIdent    :: T.Text
   , varType     :: Type

@@ -24,7 +24,7 @@ translateBody l ir@IR{irCFlowIdx=i} = aux l ir{irCFlowIdx=i+1} (Label (labelSuff
   where
     aux :: [L.SExpr] -> IR -> Label -> [CFlow] -> ([CFlow], IR)
     aux [] ir' (Label (n, exprs)) acc = 
-      if length exprs /= 0 then (Lbl (Label (n, reverse exprs)) : acc, ir')
+      if length exprs /= 0 then (Lbl (Label (n, exprs)) : acc, ir')
                            else (acc, ir')
     aux (sexpr : rest) ir' lbl acc =
       let (flow, ir'', lbl') = fromSExpr sexpr ir' lbl in
@@ -64,7 +64,7 @@ fromSExpr (L.SEExpr ex) ir (Label (n, exprs)) =
 fromSExpr (L.SEFlow flow) ir old_lbl@(Label (_, exprs)) =
   let (ex', ir'@IR{irCFlowIdx=i}) = fromCFlow flow ir in
   if length exprs /= 0 
-  then ([Lbl old_lbl, ex'], ir'{irCFlowIdx=i + 1}, Label (labelSuffix i, []))
+  then ([ex', Lbl old_lbl], ir'{irCFlowIdx=i + 1}, Label (labelSuffix i, []))
   else ([ex'], ir'{irCFlowIdx=i + 1}, Label (labelSuffix i, []))
 fromSExpr (L.SEVar _ L.Var{varIdent = ident, varType = t, varValue = v}) ir (Label (n, exprs)) =
   let 
@@ -260,6 +260,12 @@ flattenExpr (Bin i t op l@(FuncCall li _ _ _) r@(Bin ri _ _ _ _)) = (flattenExpr
 flattenExpr (Bin i t op l@(FuncCall li _ _ _) r@(Un ri _ _ _)) = (flattenExpr l) <> (flattenExpr r) <> [(Bin i t op (Ident li False) (Ident ri False))] 
 flattenExpr (Bin i t op l@(Bin li _ _ _ _) r@(FuncCall ri _ _ _)) = (flattenExpr l) <> (flattenExpr r) <> [(Bin i t op (Ident li False) (Ident ri False))] 
 flattenExpr (Bin i t op l@(Un li _ _ _) r@(FuncCall ri _ _ _)) = (flattenExpr l) <> (flattenExpr r) <> [(Bin i t op (Ident li False) (Ident ri False))] 
+flattenExpr (Bin i t op l@(Bin li _ _ _ _) r) = (flattenExpr l) <> [(Bin i t op (Ident li False) r)] 
+flattenExpr (Bin i t op l@(Un li _ _ _) r) = (flattenExpr l) <> [(Bin i t op (Ident li False) r)] 
+flattenExpr (Bin i t op l@(FuncCall li _ _ _) r) = (flattenExpr l) <> [(Bin i t op (Ident li False) r)] 
+flattenExpr (Bin i t op l r@(Bin ri _ _ _ _)) = (flattenExpr r) <> [(Bin i t op l (Ident ri False))] 
+flattenExpr (Bin i t op l r@(Un ri _ _ _)) = (flattenExpr r) <> [(Bin i t op l (Ident ri False))] 
+flattenExpr (Bin i t op l r@(FuncCall ri _ _ _)) = (flattenExpr r) <> [(Bin i t op l (Ident ri False))] 
 flattenExpr b@(Bin _ _ _ _ _) = [b]
 flattenExpr (Un i t op v@(Bin vi _ _ _ _)) = (flattenExpr v) <> [(Un i t op (Ident vi False))]
 flattenExpr (Un i t op v@(Un vi _ _ _)) = (flattenExpr v) <> [(Un i t op (Ident vi False))] 
@@ -296,7 +302,7 @@ programToIR (L.Program funcs glbls _) =
     funcsToIR ((L.Func ident _ args ret body) : fs) ir'' acc =
       let
         (body', ir''') = translateBody body ir''
-        body'' = patchJumps (NE.fromList body') ir'''
+        body'' = patchJumps (NE.fromList $ reverse body') ir'''
         body''' = flattenBody body''
         func = Fn ident args (body''') ret
       in funcsToIR fs ir''' (func : acc)

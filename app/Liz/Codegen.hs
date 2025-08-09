@@ -155,15 +155,7 @@ fromIROp (IRExpr e) = fromExpr e
 fromIROp (IRVar (Variable i _ (Bin _ t op l r))) = fromExpr $ Bin i t op l r
 fromIROp (IRVar (Variable i _ (Un _ t op v))) = fromExpr $ Un i t op v
 fromIROp (IRVar (Variable i _ (FuncCall _ t func vs))) = fromExpr $ FuncCall i t func vs
-fromIROp (IRVar (Variable i t (Ident ident isGlobal))) = 
-  let 
-    t' = typeToPrim t
-    i' = Q.Assignment (Q.Ident @Q.Temp i) (Q.AbiPrim t')
-    ident' = 
-      if isGlobal then Q.VConst $ Q.CGlobal (Q.Ident @Q.Global ident)
-                  else Q.VTemp $ Q.Ident @Q.Temp ident
-  in [Q.Unary i' Q.Copy ident']
-fromIROp (IRVar (Variable i t v@(EVal _))) =
+fromIROp (IRVar (Variable i t v@((EVal _);(Ident _ _)))) =
   let
     t' = typeToPrim t
     i' = Q.Assignment (Q.Ident @Q.Temp i) (Q.AbiPrim t')

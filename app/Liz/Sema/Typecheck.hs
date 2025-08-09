@@ -3,38 +3,41 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OrPatterns #-}
 
-module Liz.Sema.Sema where
+module Liz.Sema.Typecheck where
 
 import qualified Liz.Common.Errors as E
 import qualified Liz.Common.Logging as Log
-import qualified Liz.Common.Types as L
+import qualified Liz.Common.Types as CT
+
 import Liz.Sema.Macro
+import Liz.Sema.Terminators
 
 import qualified Data.Map as M
 import qualified Data.Text as T
+import qualified Data.List.NonEmpty as NE
 
 import Data.List (mapAccumL)
 import Data.Either (lefts, rights)
 import Data.Foldable (fold)
 
 data Env = Env 
-  { envFuncs  :: M.Map T.Text (L.Type, [L.Type])
-  , envVars   :: M.Map T.Text L.Type
-  , envConsts :: M.Map T.Text L.Type
+  { envFuncs  :: M.Map T.Text (CT.Type, [CT.Type])
+  , envVars   :: M.Map T.Text CT.Type
+  , envConsts :: M.Map T.Text CT.Type
   } deriving (Show, Eq)
 
 -- helper sema functions
 mkEnv :: Env
 mkEnv = Env {envFuncs = M.empty, envVars = M.empty, envConsts = M.empty}
 
-inferBody :: [L.SExpr] -> Env -> [Either [E.SemErr] L.Type]
+inferBody :: [CT.SExpr] -> Env -> [Either [E.SemErr] CT.Type]
 inferBody exprs env = 
   snd . fst $ mapAccumL 
     (\(env', acc) expr -> 
       let (expr', env'') = infer expr env' in 
       ((env'', expr' : acc), env'')) (env, []) (reverse exprs)
 
-analyseAndPrintErrs :: L.Program -> FilePath -> String -> IO ()
+analyseAndPrintErrs :: CT.Program -> FilePath -> String -> IO ()
 analyseAndPrintErrs prog f ftext =
   let 
     subbed_prog = substituteMacros prog 
@@ -44,7 +47,7 @@ analyseAndPrintErrs prog f ftext =
   then Log.printErrs f ftext errs []
   else
     let
-      (L.Program funcs' glbls' _) = head' $ rights [subbed_prog]
+      (CT.Program funcs' glbls' _) = head' $ rights [subbed_prog]
       (glbl_errs, env') = inferGlbls glbls' mkEnv []
       (func_errs, mainCount) = inferFuncs funcs' env' 0 []
     in
@@ -61,15 +64,15 @@ analyseAndPrintErrs prog f ftext =
                 | mainCount == 0 -> Log.printErrs f ftext [E.NoEntrypoint] []
                 | otherwise -> putStrLn "all good"
   where
-    inferGlbls :: [L.GlblVar] -> Env -> [Either [E.SemErr] L.Type] -> ([E.SemErr], Env)
+    inferGlbls :: [CT.GlblVar] -> Env -> [Either [E.SemErr] CT.Type] -> ([E.SemErr], Env)
     inferGlbls [] env acc = (fold $ lefts acc, env)
-    inferGlbls ((L.GlblVar range v) : gs) env acc =
+    inferGlbls ((CT.GlblVar range v) : gs) env acc =
       let (result, env') = inferVariable range v env True in
       inferGlbls gs env' (result : acc)
 
-    inferFuncs :: [L.Func] -> Env -> Int -> [Either [E.SemErr] L.Type] -> ([E.SemErr], Int)
+    inferFuncs :: [CT.Func] -> Env -> Int -> [Either [E.SemErr] CT.Type] -> ([E.SemErr], Int)
     inferFuncs [] _ i acc = (fold $ lefts acc, i)
-    inferFuncs (fn@L.Func{funcIdent="main", funcReturnType=ret} : fs) env i acc =
+    inferFuncs (fn@CT.Func{funcIdent="main", funcReturnType=ret} : fs) env i acc =
       let (result, env') = inferFunc fn env in 
       inferFuncs fs env' (i + 1) (result : acc)
       -- if ret /= L.Int' then inferFuncs fs env' (i + 1) (result : acc)
@@ -78,9 +81,10 @@ analyseAndPrintErrs prog f ftext =
       let (result, env') = inferFunc fn env in inferFuncs fs env' i (result : acc)
 
 -- TODO: Allow declarations in any order.
-analyseProgram :: L.Program -> Either [E.SemErr] L.Program
+analyseProgram :: CT.Program -> Either [E.SemErr] CT.Program
 analyseProgram prog = do
-  subbed_prog@(L.Program funcs' glbls' _) <- substituteMacros prog
+  prog' <- inspectTerminators prog
+  subbed_prog@(CT.Program funcs' glbls' _) <- substituteMacros prog'
   let 
     (glbl_errs, env') = inferGlbls glbls' mkEnv []
     (func_errs, mainCount) = inferFuncs funcs' env' 0 []
@@ -98,40 +102,40 @@ analyseProgram prog = do
               | mainCount == 0 -> Left [E.NoEntrypoint]
               | otherwise -> Right subbed_prog
   where
-    inferGlbls :: [L.GlblVar] -> Env -> [Either [E.SemErr] L.Type] -> ([E.SemErr], Env)
+    inferGlbls :: [CT.GlblVar] -> Env -> [Either [E.SemErr] CT.Type] -> ([E.SemErr], Env)
     inferGlbls [] env acc = (fold $ lefts acc, env)
-    inferGlbls ((L.GlblVar range v) : gs) env acc =
+    inferGlbls ((CT.GlblVar range v) : gs) env acc =
       let (result, env') = inferVariable range v env True in
       inferGlbls gs env' (result : acc)
 
-    inferFuncs :: [L.Func] -> Env -> Int -> [Either [E.SemErr] L.Type] -> ([E.SemErr], Int)
+    inferFuncs :: [CT.Func] -> Env -> Int -> [Either [E.SemErr] CT.Type] -> ([E.SemErr], Int)
     inferFuncs [] _ i acc = (fold $ lefts acc, i)
-    inferFuncs (f@L.Func{funcIdent=ident} : fs) env i acc =
+    inferFuncs (f@CT.Func{funcIdent=ident} : fs) env i acc =
       let (result, env') = inferFunc f env in
       if ident == "main" then inferFuncs fs env' (i + 1) (result : acc)
                          else inferFuncs fs env' i (result : acc)
 
 -- main typechecking/sema functions.
-infer :: L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
-infer (L.SEExpr ex) env = inferExpr ex env
-infer (L.SEFlow (L.FBlockStmt _ body)) env = inferBlock body env
-infer (L.SEFlow (L.FIfStmt range cond tbr fbr)) env = inferIfStmt range cond tbr fbr env
-infer (L.SEVar range v) env = inferVariable range v env False
-infer (L.SEConst range v) env = inferVariable range v env True
-infer (L.SESet range i v) env = inferSet range i v env
-infer L.SEComment env = (Right L.String', env)
+infer :: CT.SExpr -> Env -> (Either [E.SemErr] CT.Type, Env)
+infer (CT.SEExpr ex) env = inferExpr ex env
+infer (CT.SEFlow (CT.FBlockStmt _ body)) env = inferBlock (NE.toList body) env
+infer (CT.SEFlow (CT.FIfStmt range cond tbr fbr)) env = inferIfStmt range cond tbr fbr env
+infer (CT.SEVar range v) env = inferVariable range v env False
+infer (CT.SEConst range v) env = inferVariable range v env True
+infer (CT.SESet range i v) env = inferSet range i v env
+infer CT.SEComment env = (Right CT.String', env)
 infer s env = (Left [E.NotImplemented s], env)
 
-inferExpr :: L.Expression -> Env -> (Either [E.SemErr] L.Type, Env)
-inferExpr (L.ELiteral ty _ _) env = (Right ty, env)
-inferExpr (L.EUnary op range v) env = checkUnary range op v env
-inferExpr (L.EBinary op range l r) env = checkBinary range op l r env
-inferExpr (L.EReturn _ v) env = inferExpr v env
-inferExpr (L.EPrint _ _) env = (Right L.Unit', env)
-inferExpr (L.EFuncCall range iden args) env = inferFuncCall range iden args env
-inferExpr (L.EIdentifier iden range) env = inferIdentifier range iden env
+inferExpr :: CT.Expression -> Env -> (Either [E.SemErr] CT.Type, Env)
+inferExpr (CT.ELiteral ty _ _) env = (Right ty, env)
+inferExpr (CT.EUnary op range v) env = checkUnary range op v env
+inferExpr (CT.EBinary op range l r) env = checkBinary range op l r env
+inferExpr (CT.EReturn _ v) env = inferExpr v env
+inferExpr (CT.EPrint _ _) env = (Right CT.Unit', env)
+inferExpr (CT.EFuncCall range iden args) env = inferFuncCall range iden args env
+inferExpr (CT.EIdentifier iden range) env = inferIdentifier range iden env
 
-inferIdentifier :: L.LizRange -> T.Text -> Env -> (Either [E.SemErr] L.Type, Env)
+inferIdentifier :: CT.LizRange -> T.Text -> Env -> (Either [E.SemErr] CT.Type, Env)
 inferIdentifier range iden env@(Env {envFuncs=fenv, envVars=venv, envConsts=cenv}) =
   let
     func = iden `M.member` fenv
@@ -147,25 +151,25 @@ inferIdentifier range iden env@(Env {envFuncs=fenv, envVars=venv, envConsts=cenv
     aux _ _ _ _ True = let ty = cenv M.! iden in (Right ty, env)
     aux r i False False False = (Left $ [E.UndefinedIdentifier r i], env)
 
-checkUnary :: L.LizRange -> L.UnaryOp -> L.Expression -> Env -> (Either [E.SemErr] L.Type, Env)
-checkUnary range _ (L.EReturn _ _) env = (Left [E.InvalidUnaryExpr range], env)
+checkUnary :: CT.LizRange -> CT.UnaryOp -> CT.Expression -> Env -> (Either [E.SemErr] CT.Type, Env)
+checkUnary range _ (CT.EReturn _ _) env = (Left [E.InvalidUnaryExpr range], env)
 checkUnary range op v env =
   case (inferExpr v env) of
     err@((Left _), _) -> err
     (Right operandType, t) -> (aux op operandType, t)
   where
-    aux :: L.UnaryOp -> L.Type -> Either [E.SemErr] L.Type
-    aux L.Negate L.Int' = Right L.Int'
-    aux L.Negate L.Float' = Right L.Float'
-    aux L.Negate t = Left $ [E.IncorrectTypes range "Float or Int" [t]]
+    aux :: CT.UnaryOp -> CT.Type -> Either [E.SemErr] CT.Type
+    aux CT.Negate CT.Int' = Right CT.Int'
+    aux CT.Negate CT.Float' = Right CT.Float'
+    aux CT.Negate t = Left $ [E.IncorrectTypes range "Float or Int" [t]]
 
-    aux L.Not L.Bool' = Right L.Bool'
-    aux L.Not t = Left $ [E.IncorrectType range L.Bool' t]
+    aux CT.Not CT.Bool' = Right CT.Bool'
+    aux CT.Not t = Left $ [E.IncorrectType range CT.Bool' t]
 
-checkBinary :: L.LizRange -> L.BinaryOp -> L.Expression -> L.Expression -> Env -> (Either [E.SemErr] L.Type, Env)
-checkBinary range _ (L.EReturn _ _) (L.EReturn _ _) env = (Left [E.InvalidBinaryExpr range], env)
-checkBinary range _ _ (L.EReturn _ _) env = (Left [E.InvalidBinaryExpr range], env)
-checkBinary range _ (L.EReturn _ _) _ env = (Left [E.InvalidBinaryExpr range], env)
+checkBinary :: CT.LizRange -> CT.BinaryOp -> CT.Expression -> CT.Expression -> Env -> (Either [E.SemErr] CT.Type, Env)
+checkBinary range _ (CT.EReturn _ _) (CT.EReturn _ _) env = (Left [E.InvalidBinaryExpr range], env)
+checkBinary range _ _ (CT.EReturn _ _) env = (Left [E.InvalidBinaryExpr range], env)
+checkBinary range _ (CT.EReturn _ _) _ env = (Left [E.InvalidBinaryExpr range], env)
 checkBinary range op l r env =
   case (inferExpr l env, inferExpr r env) of
     ((Left el, env'), (Left er, _)) -> (Left $ el <> er, env')
@@ -173,32 +177,32 @@ checkBinary range op l r env =
     (_, err@(Left _, _)) -> err
     ((Right leftType, _), (Right rightType, _)) -> (aux op leftType rightType, env) -- can't define stuff in binary sexprs
   where
-    aux :: L.BinaryOp -> L.Type -> L.Type -> Either [E.SemErr] L.Type
-    aux L.Concat L.String' L.String' = Right L.String'
-    aux L.Concat L.String' rt = Left $ [E.IncorrectType range L.String' rt]
-    aux L.Concat lt L.String' = Left $ [E.IncorrectType range L.String' lt]
-    aux L.Concat lt rt = Left $ [E.IncorrectTypes range "String"  [lt, rt]]
+    aux :: CT.BinaryOp -> CT.Type -> CT.Type -> Either [E.SemErr] CT.Type
+    aux CT.Concat CT.String' CT.String' = Right CT.String'
+    aux CT.Concat CT.String' rt = Left $ [E.IncorrectType range CT.String' rt]
+    aux CT.Concat lt CT.String' = Left $ [E.IncorrectType range CT.String' lt]
+    aux CT.Concat lt rt = Left $ [E.IncorrectTypes range "String"  [lt, rt]]
 
-    aux (L.Add; L.Subtract; L.Multiply; L.Divide) L.Int' L.Int' = Right L.Int'
-    aux (L.Add; L.Subtract; L.Multiply; L.Divide) lt L.Int' = Left [E.IncorrectType range L.Int' lt]
-    aux (L.Add; L.Subtract; L.Multiply; L.Divide) L.Int' rt = Left [E.IncorrectType range L.Int' rt]
+    aux (CT.Add; CT.Subtract; CT.Multiply; CT.Divide) CT.Int' CT.Int' = Right CT.Int'
+    aux (CT.Add; CT.Subtract; CT.Multiply; CT.Divide) lt CT.Int' = Left [E.IncorrectType range CT.Int' lt]
+    aux (CT.Add; CT.Subtract; CT.Multiply; CT.Divide) CT.Int' rt = Left [E.IncorrectType range CT.Int' rt]
 
-    aux (L.Add; L.Subtract; L.Multiply; L.Divide) L.Float' L.Float' = Right L.Float'
-    aux (L.Add; L.Subtract; L.Multiply; L.Divide) lt L.Float' = Left [E.IncorrectType range L.Float' lt]
-    aux (L.Add; L.Subtract; L.Multiply; L.Divide) L.Float' rt = Left [E.IncorrectType range L.Float' rt]
-    aux (L.Add; L.Subtract; L.Multiply; L.Divide) lt rt = Left $ [E.IncorrectTypes range "Float or Int" [lt, rt]]
+    aux (CT.Add; CT.Subtract; CT.Multiply; CT.Divide) CT.Float' CT.Float' = Right CT.Float'
+    aux (CT.Add; CT.Subtract; CT.Multiply; CT.Divide) lt CT.Float' = Left [E.IncorrectType range CT.Float' lt]
+    aux (CT.Add; CT.Subtract; CT.Multiply; CT.Divide) CT.Float' rt = Left [E.IncorrectType range CT.Float' rt]
+    aux (CT.Add; CT.Subtract; CT.Multiply; CT.Divide) lt rt = Left $ [E.IncorrectTypes range "Float or Int" [lt, rt]]
 
-    aux (L.Less; L.Greater; L.Eql; L.NotEql; L.GreaterEql; L.LessEql) lt rt
-      | lt == rt = Right L.Bool'
+    aux (CT.Less; CT.Greater; CT.Eql; CT.NotEql; CT.GreaterEql; CT.LessEql) lt rt
+      | lt == rt = Right CT.Bool'
       | otherwise = Left $ [E.IncorrectType range lt rt]
 
-inferVariable :: L.LizRange -> L.Var -> Env -> Bool -> (Either [E.SemErr] L.Type, Env)
-inferVariable range L.Var{..} env isConst =
+inferVariable :: CT.LizRange -> CT.Var -> Env -> Bool -> (Either [E.SemErr] CT.Type, Env)
+inferVariable range CT.Var{..} env isConst =
   case (inferExpr varValue env) of
     err@(Left _, _) -> err
     (Right ty, env') -> aux varIdent varType ty env'
   where
-    aux :: T.Text -> L.Type -> L.Type -> Env -> (Either [E.SemErr] L.Type, Env)
+    aux :: T.Text -> CT.Type -> CT.Type -> Env -> (Either [E.SemErr] CT.Type, Env)
     aux ident decType valType t@(Env {envVars=varMap, envConsts=constMap, envFuncs=funcMap})
       | ident `M.member` varMap || ident `M.member` constMap || ident `M.member` funcMap = (Left $ [E.IdentifierAlreadyInUse range ident], env)
       | valType /= decType = 
@@ -210,13 +214,13 @@ inferVariable range L.Var{..} env isConst =
         in if isConst then (Right decType, t{envConsts=newenv constMap})
                       else (Right decType, t{envVars=newenv varMap})
 
-inferSet :: L.LizRange -> T.Text -> L.Expression -> Env -> (Either [E.SemErr] L.Type, Env)
+inferSet :: CT.LizRange -> T.Text -> CT.Expression -> Env -> (Either [E.SemErr] CT.Type, Env)
 inferSet range ident v env =
   case (inferExpr v env) of
     err@(Left _, _) -> err
     (Right ty, env') -> aux ident ty env'
   where
-    aux :: T.Text -> L.Type -> Env -> (Either [E.SemErr] L.Type, Env)
+    aux :: T.Text -> CT.Type -> Env -> (Either [E.SemErr] CT.Type, Env)
     aux i ty e@(Env{..})
       | i `M.member` envConsts = (Left $ [E.AssigningToConstant range i], e)
       | i `M.member` envFuncs = (Left $ [E.AssigningToFunction range ident], e)
@@ -227,14 +231,14 @@ inferSet range ident v env =
           Just correctType | correctType == ty -> (Right ty, e)
                            | otherwise -> (Left $ [E.IncorrectType range correctType ty], e)
 
-inferFunc :: L.Func -> Env -> (Either [E.SemErr] L.Type, Env)
-inferFunc (L.Func{..}) env@(Env{..})
+inferFunc :: CT.Func -> Env -> (Either [E.SemErr] CT.Type, Env)
+inferFunc (CT.Func{..}) env@(Env{..})
   | funcIdent `M.member` envFuncs || funcIdent `M.member` envVars || funcIdent `M.member` envConsts = (Left $ [E.IdentifierAlreadyInUse funcPos funcIdent], env)
   | otherwise =
     let
       argTypeErrs = 
-        lefts $ foldMap (\L.Arg{..} -> if argType == L.Unit' then [Left (E.InvalidArgType funcPos argIdent argType)] else [Right ()]) funcArgs
-      envWithArgs = flip addArgs env $ map (\L.Arg{..} -> (argIdent, argType)) funcArgs
+        lefts $ foldMap (\CT.Arg{..} -> if argType == CT.Unit' then [Left (E.InvalidArgType funcPos argIdent argType)] else [Right ()]) funcArgs
+      envWithArgs = flip addArgs env $ map (\CT.Arg{..} -> (argIdent, argType)) funcArgs
       errsAndTypes = collectErrors $ inferBody funcBody envWithArgs
     in aux errsAndTypes funcReturnType argTypeErrs
   where
@@ -248,14 +252,14 @@ inferFunc (L.Func{..}) env@(Env{..})
                   | length aterrs /= 0 -> (Left aterrs, env)
                   | last types /= ret -> (Left $ [E.IncorrectType funcPos ret (last types)], env)
                   | otherwise -> 
-                      let newFuncMap = M.insert funcIdent (funcReturnType, (map L.argType funcArgs)) (envFuncs)
+                      let newFuncMap = M.insert funcIdent (funcReturnType, (map CT.argType funcArgs)) (envFuncs)
                       in (Right ret, env{envFuncs=newFuncMap})
 
-    addArgs :: [(T.Text, L.Type)] -> Env -> Env
+    addArgs :: [(T.Text, CT.Type)] -> Env -> Env
     addArgs [] e = e
     addArgs ((i, t) : xs) e@(Env{envConsts=cenv}) = addArgs xs $ e{envConsts=M.insert i t cenv} -- args are constant by default
 
-inferBlock :: [L.SExpr] -> Env -> (Either [E.SemErr] L.Type, Env)
+inferBlock :: [CT.SExpr] -> Env -> (Either [E.SemErr] CT.Type, Env)
 inferBlock body env =
   let 
     result = inferBody body env
@@ -264,7 +268,7 @@ inferBlock body env =
   if length errs /= 0 then (Left errs, env)
                       else (Right $ last types, env)
 
-inferFuncCall :: L.LizRange -> T.Text -> [L.Expression] -> Env -> (Either [E.SemErr] L.Type, Env)
+inferFuncCall :: CT.LizRange -> T.Text -> [CT.Expression] -> Env -> (Either [E.SemErr] CT.Type, Env)
 inferFuncCall range ident sexprs env@(Env{..})
   | ident `M.notMember` envFuncs || ident `M.member` envConsts || ident `M.member` envVars = (Left $ [E.UndefinedIdentifier range ident], env)
   | otherwise =
@@ -277,7 +281,7 @@ inferFuncCall range ident sexprs env@(Env{..})
           in if length errs /= 0 then (Left errs, env)
                                  else aux types argTys ty
   where
-    aux :: [L.Type] -> [L.Type] -> L.Type -> (Either [E.SemErr] L.Type, Env)
+    aux :: [CT.Type] -> [CT.Type] -> CT.Type -> (Either [E.SemErr] CT.Type, Env)
     aux ts as ret 
       | length ts > length as = (Left $ [E.TooManyArgs range ident (length ts - length as)], env)
       | length ts < length as = (Left $ [E.NotEnoughArgs range ident (length as - length ts)], env) 
@@ -286,19 +290,19 @@ inferFuncCall range ident sexprs env@(Env{..})
         if length wts /= 0 then (Left $ [E.IncorrectArgTypes range ident as wts], env)
                            else (Right ret, env)
 
-    findWrongTypes :: [L.Type] -> [L.Type] -> [L.Type]
+    findWrongTypes :: [CT.Type] -> [CT.Type] -> [CT.Type]
     findWrongTypes [] _ = []
     findWrongTypes (x : xs) ys | not $ x `elem` ys = x : findWrongTypes xs ys
                                | otherwise = findWrongTypes xs ys
 
-inferIfStmt :: L.LizRange -> L.Expression -> L.SExpr -> Maybe L.SExpr -> Env -> (Either [E.SemErr] L.Type, Env)
-inferIfStmt range (L.EReturn _ _) _ _ env = (Left [E.InvalidIfStmt range], env)
+inferIfStmt :: CT.LizRange -> CT.Expression -> CT.SExpr -> Maybe CT.SExpr -> Env -> (Either [E.SemErr] CT.Type, Env)
+inferIfStmt range (CT.EReturn _ _) _ _ env = (Left [E.InvalidIfStmt range], env)
 inferIfStmt range cond tbranch Nothing env =
   case (inferExpr cond env, infer tbranch env) of
     ((Left ecs, _), (Left ets, env')) -> (Left $ ecs <> ets, env')
     (err@((Left _), _), _) -> err
     (_, err@(Left _, _)) -> err
-    ((Right tccond, _), (Right tctbr, env')) | tccond /= L.Bool' -> (Left [E.IncorrectType range L.Bool' tccond], env')
+    ((Right tccond, _), (Right tctbr, env')) | tccond /= CT.Bool' -> (Left [E.IncorrectType range CT.Bool' tccond], env')
                                              | otherwise -> (Right tctbr, env')
 inferIfStmt range cond tbranch (Just fbranch) env =
   case (inferExpr cond env, infer tbranch env, infer fbranch env) of
@@ -306,7 +310,7 @@ inferIfStmt range cond tbranch (Just fbranch) env =
     (err@((Left _), _), _, _) -> err
     (_, err@(Left _, _), _) -> err
     (_, _, err@(Left _, _)) -> err
-    ((Right tccond, _), (Right tctbr, _), (Right tcfbr, env')) | tccond /= L.Bool' && tctbr /= tcfbr -> (Left [E.IncorrectType range L.Bool' tccond, E.IncorrectType range tctbr tcfbr], env')
-                                                               | tccond /= L.Bool' -> (Left [E.IncorrectType range L.Bool' tccond], env')
+    ((Right tccond, _), (Right tctbr, _), (Right tcfbr, env')) | tccond /= CT.Bool' && tctbr /= tcfbr -> (Left [E.IncorrectType range CT.Bool' tccond, E.IncorrectType range tctbr tcfbr], env')
+                                                               | tccond /= CT.Bool' -> (Left [E.IncorrectType range CT.Bool' tccond], env')
                                                                | tctbr /= tcfbr -> (Left [E.IncorrectType range tctbr tcfbr], env')
                                                                | otherwise -> (Right tcfbr, env')

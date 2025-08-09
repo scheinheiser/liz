@@ -2,7 +2,7 @@
 
 module Liz.IR.IRTypes (IR (..), Fn (..), Variable (..), IROp (..), CFlow (..), Expr (..), Val (..), Label (..), Goto) where
 
-import qualified Liz.Common.Types as L
+import qualified Liz.Common.Types as CT
 import qualified Data.Text as T
 import qualified Data.Map as M
 
@@ -35,12 +35,12 @@ instance Pretty Val where
   pretty (Str i _) = (pretty @T.Text "string") <> lbracket <> (pretty $ T.drop 3 i) <> rbracket
   pretty Unt = pretty @T.Text "()"
 
-data Expr = Bin T.Text L.Type L.BinaryOp Expr Expr
-  | Un T.Text L.Type L.UnaryOp Expr
+data Expr = Bin T.Text CT.Type CT.BinaryOp Expr Expr
+  | Un T.Text CT.Type CT.UnaryOp Expr
   | Ret Expr
   | Print Expr
-  | Phi T.Text L.Type [(LabelIdent, Expr)] -- identifier - label names + the value associated with it
-  | FuncCall T.Text L.Type T.Text [Expr]
+  | Phi T.Text CT.Type [(LabelIdent, Expr)] -- identifier - label names + the value associated with it
+  | FuncCall T.Text CT.Type T.Text [Expr]
   | Ident T.Text Bool -- name, flag if it's global.
   | EVal Val
   deriving Show
@@ -79,7 +79,7 @@ instance Pretty CFlow where
   pretty (BlockStmt n exprs) =
     (pretty @T.Text $ n <> ":") <> line <> (indent 2 . vcat $ map pretty exprs)
 
-data Variable = Variable T.Text L.Type Expr
+data Variable = Variable T.Text CT.Type Expr
   deriving Show
 
 instance Pretty Variable where
@@ -97,7 +97,7 @@ instance Pretty IROp where
   pretty (IRVar v) = pretty v 
   pretty (IRGoto name) = (pretty @T.Text "goto") <+> (pretty name)
 
-data Fn = Fn T.Text [L.Arg] [CFlow] L.Type -- identifier - exprs - return type
+data Fn = Fn T.Text [CT.Arg] [CFlow] CT.Type -- identifier - exprs - return type
   deriving Show
 instance Pretty Fn where
   pretty (Fn i args body retTy) =
@@ -106,8 +106,8 @@ instance Pretty Fn where
         <> (pretty @T.Text ":") <> line 
           <> (indent 2 . vcat $ map pretty body)
     where
-      prettifyArg :: L.Arg -> Doc ann
-      prettifyArg (L.Arg {argIdent=name, argType=ty}) = (pretty @T.Text $ name <> ":") <+> (viaShow ty)
+      prettifyArg :: CT.Arg -> Doc ann
+      prettifyArg (CT.Arg {argIdent=name, argType=ty}) = (pretty @T.Text $ name <> ":") <+> (viaShow ty)
 
 data IR = IR 
   { irFuncs            :: [Fn]
@@ -116,7 +116,7 @@ data IR = IR
   , irStringIdx        :: !Int
   , irTempVarIdx       :: !Int -- to provide identifiers for temporary variables
   , irCFlowIdx         :: !Int -- to provide labels for control flow statements.
-  , irSymbols          :: M.Map T.Text L.Type
+  , irSymbols          :: M.Map T.Text CT.Type
   } deriving Show
 
 -- helper pretty functions
@@ -160,19 +160,19 @@ formatIfStmt id' cond _ tlbl@(Label (gototrue, _)) (Just (flbl@(Label (gotofalse
         <> line <> (pretty $ Lbl tlbl) 
           <> (pretty $ Lbl flbl)
 
-binaryToText :: L.BinaryOp -> T.Text
-binaryToText L.Add = "+"
-binaryToText L.Subtract = "-"
-binaryToText L.Multiply = "*"
-binaryToText L.Divide = "/"
-binaryToText L.Greater = ">"
-binaryToText L.GreaterEql = ">="
-binaryToText L.Less = "<"
-binaryToText L.LessEql = "<="
-binaryToText L.Eql = "=="
-binaryToText L.NotEql = "!="
-binaryToText L.Concat = "++"
+binaryToText :: CT.BinaryOp -> T.Text
+binaryToText CT.Add = "+"
+binaryToText CT.Subtract = "-"
+binaryToText CT.Multiply = "*"
+binaryToText CT.Divide = "/"
+binaryToText CT.Greater = ">"
+binaryToText CT.GreaterEql = ">="
+binaryToText CT.Less = "<"
+binaryToText CT.LessEql = "<="
+binaryToText CT.Eql = "=="
+binaryToText CT.NotEql = "!="
+binaryToText CT.Concat = "++"
 
-unaryToText :: L.UnaryOp -> T.Text
-unaryToText L.Not = "not"
-unaryToText L.Negate = "negate"
+unaryToText :: CT.UnaryOp -> T.Text
+unaryToText CT.Not = "not"
+unaryToText CT.Negate = "negate"

@@ -3,6 +3,7 @@
 module Liz.Common.Types where
 
 import qualified Data.Text as T
+import qualified Data.List.NonEmpty as NE
 import Prettyprinter (Pretty (..))
 
 -- TODO: add support for specific integer/float sizes (i.e. i32, i64, f32, f64)
@@ -99,7 +100,7 @@ data Expression = EBinary BinaryOp LizRange Expression Expression
   | EValueMacro T.Text LizRange
   deriving (Show, Eq)
 
-data ControlFlow = FBlockStmt LizRange [SExpr]
+data ControlFlow = FBlockStmt LizRange (NE.NonEmpty SExpr)
   | FIfStmt    LizRange Expression SExpr (Maybe SExpr) -- cond - truebranch - optional falsebranch
   deriving (Show, Eq)
 

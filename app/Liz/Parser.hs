@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NamedDefaults #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE PatternGuards #-}
 
 module Liz.Parser where
 
@@ -333,7 +332,7 @@ parseBlock = do
   hspace
   block <- some $ L.lineFold scn $ \_ -> parseSExpr
   e <- getCurrentLine
-  pure $ SEFlow $ FBlockStmt (LizRange s e) block
+  pure $ SEFlow $ FBlockStmt (LizRange s e) (NE.fromList block)
 
 parseIfStmt :: Parser SExpr
 parseIfStmt = do
@@ -394,10 +393,10 @@ parseFile f fc = do
     (Right (Program funcs glbls macros)) -> Right $ Program (map aux funcs) glbls macros
   where
     aux :: Func -> Func
-    aux fn@Func{funcBody=body} = fn{funcBody = reverse $ removeComments body}
+    aux fn@Func{funcBody=body} = fn{funcBody = removeComments body}
 
     removeComments :: [SExpr] -> [SExpr]
     removeComments [] = []
     removeComments (SEComment : rest) = removeComments rest
-    removeComments (SEFlow (FBlockStmt r body) : rest) = (SEFlow $ FBlockStmt r (filter (SEComment /=) body)) : removeComments rest
+    removeComments (SEFlow (FBlockStmt r body) : rest) = (SEFlow $ FBlockStmt r (NE.fromList . NE.filter (SEComment /=) $ body)) : removeComments rest
     removeComments (expr : rest) = expr : removeComments rest

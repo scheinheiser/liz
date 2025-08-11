@@ -187,8 +187,8 @@ fromExpr (CT.EFuncCall _ ident params) ir@IR{irSymbols=symmap, irTempVarIdx=i} =
   (FuncCall temp_i ty ident params', ir'''{irTempVarIdx=i + 1})
 
 -- FIX: detect if there's nested if statements
-patchJumps :: NE.NonEmpty CFlow -> IR -> [CFlow]
-patchJumps = aux . NE.toList
+patchJumps :: [CFlow] -> IR -> [CFlow]
+patchJumps c = aux (reverse c)
   where
     aux :: [CFlow] -> IR -> [CFlow]
     aux [] _ = []
@@ -208,12 +208,9 @@ patchJumps = aux . NE.toList
       in (IfStmt id' cond next (Label (gototrue, patched_texprs)) (Just (Label (gotofalse, patched_fexprs))))
     patchCFlow (BlockStmt id' exprs) next ir =
       let 
+        gotoend = [Lbl $ Label ("end$" <> id', [IRGoto next])]
         patched_exprs = aux exprs ir 
-        gotoend = [Lbl $ Label ("end", [IRGoto next])]
-        patched_exprs' =
-          case (last patched_exprs) of
-            Lbl (Label ("end", _)) -> (init patched_exprs) <> gotoend
-            _ -> aux (patched_exprs <> gotoend) ir
+        patched_exprs' = aux (patched_exprs <> gotoend) ir
       in
       (BlockStmt id' patched_exprs')
     patchCFlow (Lbl (Label (n, exprs))) next _ =
@@ -281,7 +278,7 @@ programToIR (CT.Program funcs glbls _) =
     funcsToIR ((CT.Func ident _ args ret body) : fs) ir'' acc =
       let
         (body', ir''') = translateBody body ir''
-        body'' = patchJumps (NE.fromList body') ir'''
+        body'' = patchJumps body' ir'''
         body''' = flattenBody body''
         func = Fn ident args (body''') ret
       in funcsToIR fs ir''' (func : acc)

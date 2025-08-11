@@ -32,7 +32,7 @@ mkEnv = Env {envFuncs = M.empty, envVars = M.empty, envConsts = M.empty}
 
 inferBody :: [CT.SExpr] -> Env -> [Either [E.SemErr] CT.Type]
 inferBody exprs env = 
-  snd . fst $ mapAccumL 
+  reverse . snd . fst $ mapAccumL 
     (\(env', acc) expr -> 
       let (expr', env'') = infer expr env' in 
       ((env'', expr' : acc), env'')) (env, []) (reverse exprs)

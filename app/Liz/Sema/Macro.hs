@@ -52,15 +52,15 @@ populateMacroTbl macros = aux macros mkMacroTbl []
     checkRecursiveDef (CT.EUnary _ _ v) def_ident = checkRecursiveDef v def_ident
     checkRecursiveDef _ _ = False
 
-subBody :: [CT.SExpr] -> MacroTbl -> [Either [E.SemErr] CT.SExpr]
-subBody exprs tbl =
+subBody :: (a -> MacroTbl -> (Either [E.SemErr] a, MacroTbl)) -> [a] -> MacroTbl -> [Either [E.SemErr] a]
+subBody subFunc exprs tbl =
   snd . fst $ 
     mapAccumL 
       (\(tbl', acc) expr -> 
-        let (res, tbl'') = macroSub expr tbl' in 
+        let (res, tbl'') = subFunc expr tbl' in 
         ((tbl'', res : acc), expr)) (tbl, []) exprs
 
-simpleSub :: (CT.Expression -> CT.SExpr) -> CT.Expression -> MacroTbl -> (Either [E.SemErr] CT.SExpr, MacroTbl)
+simpleSub :: (CT.Expression -> a) -> CT.Expression -> MacroTbl -> (Either [E.SemErr] a, MacroTbl)
 simpleSub dec v tbl =
   let 
     (subbed_value, _) = macroSubExpr v tbl 
@@ -72,22 +72,10 @@ simpleSub dec v tbl =
     let filtered_value = head' subbed_value' in
     (Right $ dec filtered_value, tbl)
 
-simpleSubExpr :: (CT.Expression -> CT.Expression) -> CT.Expression -> MacroTbl -> (Either [E.SemErr] CT.Expression, MacroTbl)
-simpleSubExpr dec v tbl =
+multiSub :: (a -> MacroTbl -> (Either [E.SemErr] a, MacroTbl)) -> ([a] -> a) -> [a] -> MacroTbl -> (Either [E.SemErr] a, MacroTbl)
+multiSub subFunc dec body tbl =
   let 
-    (subbed_value, _) = macroSubExpr v tbl 
-    (value_errs, subbed_value') = collectErrors [subbed_value]
-  in
-  if length value_errs /= 0 
-  then (Left value_errs, tbl)
-  else
-    let filtered_value = head' subbed_value' in
-    (Right $ dec filtered_value, tbl)
-
-multiSub :: ([CT.SExpr] -> CT.SExpr) -> [CT.SExpr] -> MacroTbl -> (Either [E.SemErr] CT.SExpr, MacroTbl)
-multiSub dec body tbl =
-  let 
-    subbed_body = subBody body tbl 
+    subbed_body = subBody subFunc body tbl 
     (errs, subbed_body')  = collectErrors subbed_body
   in
   if length errs /= 0 
@@ -95,25 +83,6 @@ multiSub dec body tbl =
   else
     let filtered_body = dec subbed_body' in
     (Right filtered_body, tbl)
-
-multiSubExpr :: ([CT.Expression] -> CT.Expression) -> [CT.Expression] -> MacroTbl -> (Either [E.SemErr] CT.Expression, MacroTbl)
-multiSubExpr dec body tbl =
-  let 
-    subbed_body = subBodyExpr body tbl 
-    (errs, subbed_body')  = collectErrors subbed_body
-  in
-  if length errs /= 0 
-  then (Left errs, tbl)
-  else 
-    let filtered_body = dec subbed_body' in
-    (Right filtered_body, tbl)
-  where
-    subBodyExpr :: [CT.Expression] -> MacroTbl -> [Either [E.SemErr] CT.Expression]
-    subBodyExpr exprs t = reverse $ aux exprs t
-      where
-        aux :: [CT.Expression] -> MacroTbl -> [Either [E.SemErr] CT.Expression]
-        aux [] _ = []
-        aux (x : xs) tbl' = let (res, tbl'') = macroSubExpr x tbl' in res : aux xs tbl''
 
 -- main macro sub functions
 substituteMacros :: CT.Program -> Either [E.SemErr] CT.Program
@@ -143,13 +112,13 @@ substituteMacros (CT.Program funcs glbls macros) = do
     subFuncs :: [CT.Func] -> MacroTbl -> [Either [E.SemErr] CT.Func]
     subFuncs [] _ = []
     subFuncs (f@CT.Func{funcBody=body} : fs) tbl =
-      let (errs, body') = collectErrors $ subBody body tbl in
+      let (errs, body') = collectErrors $ subBody macroSub body tbl in
       if length errs /= 0 then (Left errs) : subFuncs fs tbl
                           else (Right f{CT.funcBody=body'}) : subFuncs fs tbl
 
 macroSub :: CT.SExpr -> MacroTbl -> (Either [E.SemErr] CT.SExpr, MacroTbl)
 macroSub (CT.SEExpr ex) tbl = let (res, tbl') = macroSubExpr ex tbl in (CT.SEExpr <$> res, tbl')
-macroSub (CT.SEFlow (CT.FBlockStmt range body)) tbl = multiSub (CT.SEFlow . CT.FBlockStmt range . NE.fromList) (NE.toList body) tbl
+macroSub (CT.SEFlow (CT.FBlockStmt range body)) tbl = multiSub macroSub (CT.SEFlow . CT.FBlockStmt range . NE.fromList) (NE.toList body) tbl
 macroSub (CT.SEVar range (CT.Var i t v)) tbl = simpleSub (\x -> CT.SEVar range (CT.Var i t x)) v tbl
 macroSub (CT.SEConst range (CT.Var i t v)) tbl = simpleSub (\x -> CT.SEConst range (CT.Var i t x)) v tbl
 macroSub (CT.SESet range i v) tbl = simpleSub (CT.SESet range i) v tbl
@@ -202,9 +171,9 @@ macroSub (CT.SEFlow (CT.FIfStmt range cond tbranch (Just fbranch))) tbl =
 macroSub v tbl = (Right v, tbl)
 
 macroSubExpr :: CT.Expression -> MacroTbl -> (Either [E.SemErr] CT.Expression, MacroTbl)
-macroSubExpr (CT.EFuncCall range i params) tbl = multiSubExpr (CT.EFuncCall range i) params tbl
-macroSubExpr (CT.EPrint range v) tbl = simpleSubExpr (CT.EPrint range) v tbl
-macroSubExpr (CT.EReturn range v) tbl = simpleSubExpr (CT.EReturn range) v tbl
+macroSubExpr (CT.EFuncCall range i params) tbl = multiSub macroSubExpr (CT.EFuncCall range i) params tbl
+macroSubExpr (CT.EPrint range v) tbl = simpleSub (CT.EPrint range) v tbl
+macroSubExpr (CT.EReturn range v) tbl = simpleSub (CT.EReturn range) v tbl
 macroSubExpr (CT.EValueMacro i range) tbl =
   let value = i `M.lookup` tbl in
   case value of
@@ -228,5 +197,5 @@ macroSubExpr (CT.EBinary op range l r) tbl =
                   filtered_right = head' subbed_right'
                   expr = CT.EBinary op range filtered_left filtered_right
                 in (Right expr, tbl)
-macroSubExpr (CT.EUnary op range v) tbl = simpleSubExpr (CT.EUnary op range) v tbl
+macroSubExpr (CT.EUnary op range v) tbl = simpleSub (CT.EUnary op range) v tbl
 macroSubExpr v tbl = (Right v, tbl)

@@ -26,13 +26,10 @@ insertReturns :: [CT.Func] -> [CT.Func]
 insertReturns = map aux
   where
     aux :: CT.Func -> CT.Func
+    aux f@CT.Func{funcIdent="main"} = f
     aux f@CT.Func{funcBody=body} =
       let 
-        l = 
-          case (last body) of
-            CT.SEExpr e -> CT.SEExpr $ handleExpr e 
-            CT.SEFlow f -> CT.SEFlow $ handleFlow f
-            expr -> expr
+        l = handleSExpr . last $ body
         body' = (init body) <> [l]
       in f{CT.funcBody=body'}
 
@@ -66,6 +63,33 @@ insertReturns = map aux
 
 checkReturns :: [CT.Func] -> [Either [E.SemErr] CT.Func]
 checkReturns [] = []
+checkReturns (f@CT.Func{funcIdent="main", funcBody=body, funcReturnType=CT.Int'} : fs) =
+  case (last body) of
+    (CT.SESet range _ _) -> Left [E.InvalidReturn range] : checkReturns fs
+    (CT.SEVar range _) -> Left [E.InvalidReturn range] : checkReturns fs
+    (CT.SEConst range _) -> Left [E.InvalidReturn range] : checkReturns fs
+    _ -> Right f : checkReturns fs
+checkReturns (f@CT.Func{funcIdent="main", funcBody=body, funcReturnType=ret, funcPos=range} : fs)
+  | ret /= CT.Unit' = Left [E.NonUnitOrIntMain] : checkReturns fs
+  | hasReturn body = Left [E.ReturnInUnitMain] : checkReturns fs
+  | otherwise =
+    let body' = body <> [CT.SEExpr . CT.EReturn range $ CT.ELiteral CT.Int' "0" range] in
+    Right f{CT.funcBody=body'} : checkReturns fs
+  where
+    hasReturn :: [CT.SExpr] -> Bool
+    hasReturn [] = False
+    hasReturn (CT.SEFlow (CT.FBlockStmt _ block) : rest) = (hasReturn . NE.toList $ block) || hasReturn rest
+    hasReturn (CT.SEFlow (CT.FIfStmt _ _ true Nothing) : rest) = (hasReturn [true]) || hasReturn rest
+    hasReturn (CT.SEFlow (CT.FIfStmt _ _ true (Just false)) : rest) = (hasReturn [true]) || (hasReturn [false]) || hasReturn rest
+    hasReturn (CT.SESet _ _ e : rest) = (hasReturn [CT.SEExpr e]) || hasReturn rest
+    hasReturn (CT.SEVar _ CT.Var{varValue=e} : rest) = (hasReturn [CT.SEExpr e]) || hasReturn rest
+    hasReturn (CT.SEConst _ CT.Var{varValue=e} : rest) = (hasReturn [CT.SEExpr e]) || hasReturn rest
+    hasReturn (CT.SEExpr (CT.EBinary _ _ l r) : rest) = (hasReturn [CT.SEExpr l]) || (hasReturn [CT.SEExpr r]) || hasReturn rest
+    hasReturn (CT.SEExpr (CT.EUnary _ _ v) : rest) = (hasReturn [CT.SEExpr v]) || hasReturn rest
+    hasReturn (CT.SEExpr (CT.EPrint _ v) : rest) = (hasReturn [CT.SEExpr v]) || hasReturn rest
+    hasReturn (CT.SEExpr (CT.EFuncCall _ _ vs) : rest) = (hasReturn . map CT.SEExpr $ vs) || hasReturn rest
+    hasReturn (CT.SEExpr (CT.EReturn _ _) : rest) = True || hasReturn rest
+    hasReturn (_ : rest) = False || hasReturn rest
 checkReturns (f@CT.Func{funcBody=body} : fs) =
   case (last body) of
     (CT.SESet range _ _) -> Left [E.InvalidReturn range] : checkReturns fs

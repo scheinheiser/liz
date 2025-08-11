@@ -127,38 +127,38 @@ formatIfStmt id' cond@(Bin ident _ _ _ _) gotomain lbl@(Label (gototrue, _)) Not
       <+> (pretty ident) <+> (pretty @T.Text "then goto") 
         <+> (pretty gototrue) <+> (pretty @T.Text "else goto") 
           <+> (pretty gotomain) <> line 
-            <> (pretty $ Lbl lbl)
+            <> (pretty lbl)
 formatIfStmt id' cond@(Un ident _ _ _) gotomain lbl@(Label (gototrue, _)) Nothing =
   (pretty cond) <> line 
     <> (pretty @T.Text id') <+> (pretty ident) 
       <+> (pretty @T.Text "then goto") <+> (pretty gototrue) 
         <+> (pretty @T.Text "else goto") <+> (pretty gotomain) 
-          <> line <> (pretty $ Lbl lbl)
+          <> line <> (pretty lbl)
 formatIfStmt id' cond gotomain lbl@(Label (gototrue, _)) Nothing =
   (pretty @T.Text id') <+> (pretty cond) 
     <+> (pretty @T.Text "then goto") <+> (pretty gototrue) 
       <+> (pretty @T.Text "else goto") <+> (pretty gotomain) 
-        <> line <> (pretty $ Lbl lbl)
+        <> line <> (pretty lbl)
 formatIfStmt id' cond@(Bin ident _ _ _ _) _ tlbl@(Label (gototrue, _)) (Just (flbl@(Label (gotofalse, _)))) =
   (pretty cond) <> line 
     <> (pretty @T.Text id') <+> (pretty ident) 
       <+> (pretty @T.Text "then goto") <+> (pretty gototrue) 
         <+> (pretty @T.Text "else goto") <+> (pretty gotofalse) 
           <> line <> (pretty $ Lbl tlbl) 
-            <> (pretty $ Lbl flbl)
+            <> (pretty flbl)
 formatIfStmt id' cond@(Un ident _ _ _) _ tlbl@(Label (gototrue, _)) (Just (flbl@(Label (gotofalse, _)))) =
   (pretty cond) <> line 
     <> (pretty @T.Text id') <+> (pretty ident) 
       <+> (pretty @T.Text "then goto") <+> (pretty gototrue) 
         <+> (pretty @T.Text "else goto") <+> (pretty gotofalse) 
           <> line <> (pretty $ Lbl tlbl) 
-            <> (pretty $ Lbl flbl)
+            <> (pretty flbl)
 formatIfStmt id' cond _ tlbl@(Label (gototrue, _)) (Just (flbl@(Label (gotofalse, _)))) =
   (pretty @T.Text id') <+> (pretty cond) 
     <+> (pretty @T.Text "then goto") <+> (pretty gototrue) 
       <+> (pretty @T.Text "else goto") <+> (pretty gotofalse) 
         <> line <> (pretty $ Lbl tlbl) 
-          <> (pretty $ Lbl flbl)
+          <> (pretty flbl)
 
 binaryToText :: CT.BinaryOp -> T.Text
 binaryToText CT.Add = "+"

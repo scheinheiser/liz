@@ -96,6 +96,7 @@ data Expression = EBinary BinaryOp LizRange Expression Expression
   | EPrint      LizRange Expression
   | EFuncCall   LizRange T.Text [Expression] -- ident - values
   | ELiteral    Type T.Text LizRange
+  | EFormat     LizRange T.Text [Expression] -- format string - values
   | EIdentifier T.Text LizRange
   | EValueMacro T.Text LizRange
   deriving (Show, Eq)

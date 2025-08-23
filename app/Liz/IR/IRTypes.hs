@@ -10,6 +10,7 @@ import Prettyprinter
 
 type Goto = T.Text
 type LabelIdent = T.Text
+type InternalStringIdent = T.Text
 newtype Label = Label (LabelIdent, [IROp]) -- name, expressions
   deriving Show
 
@@ -22,7 +23,7 @@ instance Pretty Label where
 data Val = Integ Int
   | Bln Bool
   | Flt Double
-  | Str T.Text T.Text
+  | Str InternalStringIdent T.Text
   | Chr Char
   | Unt 
   deriving Show
@@ -43,6 +44,7 @@ data Expr = Bin T.Text CT.Type CT.BinaryOp Expr Expr
   | FuncCall T.Text CT.Type T.Text [Expr]
   | Ident T.Text Bool -- name, flag if it's global.
   | EVal Val
+  | Format T.Text (InternalStringIdent, T.Text) [Expr] -- interal buffer ident, (internal string ident, format string), format params
   deriving Show
 
 instance Pretty Expr where
@@ -65,6 +67,11 @@ instance Pretty Expr where
     (pretty @T.Text i) 
       <> (parens . hsep . punctuate comma $ map pretty exprs)
   pretty (EVal v) = pretty v
+  pretty (Format _ (_, fstr) []) =
+    (pretty @T.Text "format") <> (parens $ pretty fstr)
+  pretty (Format _ (_, fstr) exprs) =
+    let body = pretty fstr : (map pretty exprs) in
+    (pretty @T.Text "format") <> (parens . hsep $ punctuate comma body)
 
 type IRBlock = [CFlow]
 

@@ -118,10 +118,10 @@ substituteMacros (CT.Program funcs glbls macros) = do
 
 macroSub :: CT.SExpr -> MacroTbl -> (Either [E.SemErr] CT.SExpr, MacroTbl)
 macroSub (CT.SEExpr ex) tbl = let (res, tbl') = macroSubExpr ex tbl in (CT.SEExpr <$> res, tbl')
-macroSub (CT.SEFlow (CT.FBlockStmt range body)) tbl = multiSub macroSub (CT.SEFlow . CT.FBlockStmt range . NE.fromList) (NE.toList body) tbl
-macroSub (CT.SEVar range (CT.Var i t v)) tbl = simpleSub (\x -> CT.SEVar range (CT.Var i t x)) v tbl
-macroSub (CT.SEConst range (CT.Var i t v)) tbl = simpleSub (\x -> CT.SEConst range (CT.Var i t x)) v tbl
-macroSub (CT.SESet range i v) tbl = simpleSub (CT.SESet range i) v tbl
+macroSub (CT.SEFlow (CT.FBlockStmt range body)) tbl = multiSub @CT.SExpr macroSub (CT.SEFlow . CT.FBlockStmt range . NE.fromList) (NE.toList body) tbl
+macroSub (CT.SEVar range (CT.Var i t v)) tbl = simpleSub @CT.SExpr (\x -> CT.SEVar range (CT.Var i t x)) v tbl
+macroSub (CT.SEConst range (CT.Var i t v)) tbl = simpleSub @CT.SExpr (\x -> CT.SEConst range (CT.Var i t x)) v tbl
+macroSub (CT.SESet range i v) tbl = simpleSub @CT.SExpr (CT.SESet range i) v tbl
 macroSub (CT.SEFlow (CT.FIfStmt range cond branch Nothing)) tbl =
   let
     (subbed_cond, _) = macroSubExpr cond tbl
@@ -171,9 +171,9 @@ macroSub (CT.SEFlow (CT.FIfStmt range cond tbranch (Just fbranch))) tbl =
 macroSub v tbl = (Right v, tbl)
 
 macroSubExpr :: CT.Expression -> MacroTbl -> (Either [E.SemErr] CT.Expression, MacroTbl)
-macroSubExpr (CT.EFuncCall range i params) tbl = multiSub macroSubExpr (CT.EFuncCall range i) params tbl
-macroSubExpr (CT.EPrint range v) tbl = simpleSub (CT.EPrint range) v tbl
-macroSubExpr (CT.EReturn range v) tbl = simpleSub (CT.EReturn range) v tbl
+macroSubExpr (CT.EFuncCall range i params) tbl = multiSub @CT.Expression macroSubExpr (CT.EFuncCall range i) params tbl
+macroSubExpr (CT.EPrint range v) tbl = simpleSub @CT.Expression (CT.EPrint range) v tbl
+macroSubExpr (CT.EReturn range v) tbl = simpleSub @CT.Expression (CT.EReturn range) v tbl
 macroSubExpr (CT.EValueMacro i range) tbl =
   let value = i `M.lookup` tbl in
   case value of
@@ -197,5 +197,5 @@ macroSubExpr (CT.EBinary op range l r) tbl =
                   filtered_right = head' subbed_right'
                   expr = CT.EBinary op range filtered_left filtered_right
                 in (Right expr, tbl)
-macroSubExpr (CT.EUnary op range v) tbl = simpleSub (CT.EUnary op range) v tbl
+macroSubExpr (CT.EUnary op range v) tbl = simpleSub @CT.Expression (CT.EUnary op range) v tbl
 macroSubExpr v tbl = (Right v, tbl)

@@ -24,11 +24,11 @@ translateBody l ir@IR{irCFlowIdx=i} = aux l ir{irCFlowIdx=i+1} (Label (labelSuff
   where
     aux :: [CT.SExpr] -> IR -> Label -> [CFlow] -> ([CFlow], IR)
     aux [] ir' (Label (n, exprs)) acc = 
-      if length exprs /= 0 then (Lbl (Label (n, exprs)) : acc, ir')
-                           else (acc, ir')
+      if length exprs /= 0 then (reverse $ Lbl (Label (n, exprs)) : acc, ir')
+                           else (reverse acc, ir')
     aux (sexpr : rest) ir' lbl acc =
       let (flow, ir'', lbl') = fromSExpr sexpr ir' lbl in
-      aux rest ir'' lbl' (acc <> flow)
+      aux rest ir'' lbl' (flow <> acc)
 
 tempVarIdent :: Int -> T.Text
 tempVarIdent i = T.pack $ "t" <> (show i)
@@ -66,9 +66,9 @@ fromSExpr (CT.SEFlow flow) ir old_lbl@(Label (_, exprs)) =
   if length exprs /= 0 
   then ([ex', Lbl old_lbl], ir'{irCFlowIdx=i + 1}, Label (labelSuffix i, []))
   else ([ex'], ir'{irCFlowIdx=i + 1}, Label (labelSuffix i, []))
-fromSExpr (CT.SEVar _ CT.Var{varIdent = ident, varType = t, varValue = v}) ir (Label (n, exprs)) =
+fromSExpr (CT.SEVar _ CT.Var{varIdent = ident, varType = t, varValue = v}) ir@IR{irSymbols=symmap} (Label (n, exprs)) =
   let 
-    (v', ir'@IR{irSymbols=symmap}) = fromExpr v ir 
+    (v', ir') = fromExpr v ir 
     var = IRVar $ Variable ident t v'
     symmap' = ident `M.insert` t $ symmap
   in
@@ -106,7 +106,7 @@ fromCFlow (CT.FIfStmt _ cond tbranch (Just fbranch)) ir@IR{irCFlowIdx=fi} =
 fromCFlow (CT.FBlockStmt _ vals) ir@IR{irCFlowIdx=fi} =
   let 
     flowidx = "block$" <> (T.show fi)
-    (body, ir') = translateBody (NE.toList vals) ir
+    (body, ir') = translateBody (reverse . NE.toList $ vals) ir
   in
   (BlockStmt flowidx body, ir'{irCFlowIdx=fi + 1})
 
@@ -185,6 +185,19 @@ fromExpr (CT.EFuncCall _ ident params) ir@IR{irSymbols=symmap, irTempVarIdx=i} =
     ty = getType symmap (Ident ident False)
   in
   (FuncCall temp_i ty ident params', ir'''{irTempVarIdx=i + 1})
+fromExpr (CT.EFormat _ fstr params) ir =
+  let 
+    ((ir'''@IR{irStringIdx=si, irAllocatedStrings=strs}, params'), _) = 
+      mapAccumL 
+        (\(ir', acc) p -> 
+          let (ex, ir'') = fromExpr p ir' in 
+          ((ir'', ex : acc), p)) (ir, []) (reverse params)
+    bufident = "fbuf" <> (T.show si) -- no need to increment, as it's different from typical strings
+    bufstring = "__buffer:" <> (T.show $ T.length fstr + 1) -- increment for null terminator
+    fstr' = "str" <> (T.show si)
+    strs' = reverse $ (bufstring, bufident) : (fstr, fstr') : strs
+  in
+  (Format bufident (fstr', "\"" <> fstr <> "\"") params', ir'''{irStringIdx=si + 1, irAllocatedStrings=strs'})
 
 -- FIX: detect if there's nested if statements
 patchJumps :: [CFlow] -> IR -> [CFlow]
@@ -217,15 +230,6 @@ patchJumps c = aux (reverse c)
       let patched_exprs = exprs <> [IRGoto next] in
       (Lbl $ Label (n, patched_exprs))
 
-    getLast :: IROp -> Expr 
-    getLast (IRExpr (Bin i _ _ _ _)) = Ident i False
-    getLast (IRExpr (Un i _ _ _)) = Ident i False
-    getLast (IRExpr op@(FuncCall _ _ _ _)) = op
-    getLast (IRVar (Variable i _ _)) = Ident i False
-    getLast (IRExpr ret@(Ret _)) = ret
-    getLast (IRExpr (Print _)) = EVal Unt
-    getLast v = error $ "\nMalformed IR -\n  " <> (show v)
-
 -- TODO: change to return nonempty
 flattenExpr :: Expr -> [Expr]
 flattenExpr (Bin i t op l@(Bin li _ _ _ _) r@(Bin ri _ _ _ _)) = (flattenExpr l) <> (flattenExpr r) <> [(Bin i t op (Ident li False) (Ident ri False))]
@@ -250,10 +254,12 @@ flattenExpr u@(Un _ _ _ _) = [u]
 flattenExpr (Ret v@(Bin vi _ _ _ _)) = (flattenExpr v) <> [(Ret $ Ident vi False)]
 flattenExpr (Ret v@(Un vi _ _ _)) = (flattenExpr v) <> [(Ret $ Ident vi False)]
 flattenExpr (Ret v@(FuncCall vi _ _ _)) = (flattenExpr v) <> [(Ret $ Ident vi False)]
+flattenExpr (Ret v@(Format vi _ _)) = (flattenExpr v) <> [(Print $ Ident vi False)]
 flattenExpr r@(Ret _) = [r]
 flattenExpr (Print v@(Bin vi _ _ _ _)) = (flattenExpr v) <> [(Print $ Ident vi False)]
 flattenExpr (Print v@(Un vi _ _ _)) = (flattenExpr v) <> [(Print $ Ident vi False)]
 flattenExpr (Print v@(FuncCall vi _ _ _)) = (flattenExpr v) <> [(Print $ Ident vi False)]
+flattenExpr (Print v@(Format vi _ _)) = (flattenExpr v) <> [(Print $ Ident vi False)]
 flattenExpr r@(Print _) = [r]
 flattenExpr expr = [expr] -- TODO: cover phi and funccall cases.
 
@@ -298,7 +304,7 @@ programToIR (CT.Program funcs glbls _) =
     flattenBody :: [CFlow] -> [CFlow]
     flattenBody [] = []
     flattenBody ((Lbl (Label (n, exprs))) : cs) = Lbl (Label (n, flattenIROp exprs)) : (flattenBody cs)
-    flattenBody ((BlockStmt i exprs) : cs) = BlockStmt i (flattenBody exprs) : (flattenBody cs)
+    flattenBody ((BlockStmt i exprs) : cs) = BlockStmt i (reverse . flattenBody $ exprs) : (flattenBody cs)
     flattenBody (IfStmt i cond main (Label (tlbl, texprs)) (Just (Label (flbl, fexprs))) : cs) =
       -- we delay flattening the condition.
       -- doing it now presents some cases which I think aren't solvable/would be annoying to catch (e.g. back-to-back if statements)

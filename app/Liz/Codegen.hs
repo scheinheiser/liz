@@ -9,6 +9,7 @@ import qualified Liz.QBE.QBE as Q
 
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
+import qualified Data.Map as M
 
 import Liz.IR.IRTypes
 import Liz.IR.IR (flattenExpr)
@@ -18,6 +19,8 @@ import Prettyprinter.Render.Text (putDoc)
 import Unsafe.Coerce (unsafeCoerce)
 import Data.Word
 import Data.Char (ord)
+
+type SymbolMap = M.Map T.Text CT.Type
 
 typeToPrim :: CT.Type -> Q.Prim
 typeToPrim CT.Int' = Q.PrimWord
@@ -48,15 +51,21 @@ ppQBE :: Q.Program -> IO ()
 ppQBE = putDoc . pretty
 
 irToQBE :: IR -> Q.Program
-irToQBE (IR funcs glbls strs _ _ _ _) =
+irToQBE (IR funcs glbls strs _ _ _ symmap) =
   let
     strs' = 
       map 
         (\(lit, n) -> 
-          let lit' = Q.DIString lit in
-          Q.DataDef (Q.Ident @Q.Global n) Nothing (NE.singleton lit')) strs
+          let 
+            lit' = 
+              if "fbuf" `T.isPrefixOf` n
+              then 
+                let (_, am) = T.breakOn ":" lit in
+              Q.DIZero (read @Int . T.unpack . T.drop 1 $ am)
+              else Q.DIString lit 
+          in Q.DataDef (Q.Ident @Q.Global n) Nothing (NE.singleton lit')) strs
     glbls' = map (\(Variable i _ expr) -> Q.DataDef (Q.Ident @Q.Global i) Nothing (NE.singleton $ fromGlblValue expr)) glbls
-    funcs' = map funcToQBE funcs
+    funcs' = map (flip funcToQBE symmap) funcs
   in Q.Program funcs' (strs' <> glbls') []
   where
     fromGlblValue :: Expr -> Q.DataItem
@@ -77,50 +86,50 @@ irToQBE (IR funcs glbls strs _ _ _ _) =
     valueToConst (Chr c) = Q.CInt False (unsafeCoerce $ ord c)
     valueToConst (Str s _) = Q.CGlobal (Q.Ident @Q.Global s)
 
-    funcToQBE :: Fn -> Q.FuncDef
-    funcToQBE (Fn ident args body ret) =
+    funcToQBE :: Fn -> SymbolMap -> Q.FuncDef
+    funcToQBE (Fn ident args body ret) symmap' =
       let
         ident' = Q.Ident @Q.Global ident
         ret' =
           case ret of
             CT.Unit' -> Nothing
             _ -> Just $ Q.AbiPrim (typeToPrim ret)
-        args' = argsToQBE args 
-        body' = foldMap fromCFlow body
+        args' = argsToParams args 
+        body' = foldMap (flip fromCFlow symmap') body
         linkage =
           if ident == "main" then (Just Q.Export) else Nothing
       in Q.FuncDef linkage ret' ident' args' (NE.fromList body')
       where
-        argsToQBE :: [CT.Arg] -> [Q.Param]
-        argsToQBE [] = []
-        argsToQBE (CT.Arg{..} : as) =
+        argsToParams :: [CT.Arg] -> [Q.Param]
+        argsToParams [] = []
+        argsToParams (CT.Arg{..} : as) =
           let
             argIdent' = Q.VTemp $ Q.Ident @Q.Temp argIdent
             -- a unit arg would cause a semantic error, and so isn't a concern here.
             argType' = Q.AbiPrim $ typeToPrim argType
-          in (Q.RegularParam argIdent' argType') : argsToQBE as
+          in (Q.RegularParam argIdent' argType') : argsToParams as
 
-fromCFlow :: CFlow -> [Q.Block]
-fromCFlow (Lbl (Label (i, body))) =
+fromCFlow :: CFlow -> SymbolMap -> [Q.Block]
+fromCFlow (Lbl (Label (i, body))) symmap =
   let
     i' = Q.Ident @Q.Label i
-    body' = foldMap fromIROp body
+    body' = foldMap (flip fromIROp symmap) body
   in [Q.Block i' body']
-fromCFlow (BlockStmt i body) =
+fromCFlow (BlockStmt i body) symmap =
   let
     -- the empty block will lead to an automatic jump to the next label.
     -- this preserves the goto from the previous cflow to this block
     i' = Q.Block (Q.Ident @Q.Label i) []
-    body' = foldMap fromCFlow body
+    body' = foldMap (flip fromCFlow symmap) body
   in [i'] <> body'
-fromCFlow (IfStmt i cond main (Label (tlbl, tbody)) Nothing) =
+fromCFlow (IfStmt i cond main (Label (tlbl, tbody)) Nothing) symmap =
   let
     i' = Q.Ident @Q.Label i
     main' = Q.Ident @Q.Label main
     tlbl' = Q.Ident @Q.Label tlbl
     flattened_cond = flattenExpr cond
-    cond' = foldMap fromExpr flattened_cond 
-    tbody' = Q.Block tlbl' (foldMap fromIROp tbody)
+    cond' = foldMap (flip fromExpr symmap) flattened_cond 
+    tbody' = Q.Block tlbl' (foldMap (flip fromIROp symmap) tbody)
     cond_block = Q.Block i' (cond' <> [Q.Jump $ Q.Jnz (getCond $ last flattened_cond) tlbl' main'])
   in [cond_block, tbody']
   where
@@ -130,15 +139,15 @@ fromCFlow (IfStmt i cond main (Label (tlbl, tbody)) Nothing) =
     getCond (Un vi _ _ _) = Q.VTemp $ Q.Ident @Q.Temp vi
     getCond (FuncCall vi _ _ _) = Q.VTemp $ Q.Ident @Q.Temp vi
     getCond _ = error "Internal error - there should never be return/print/phi in condition."
-fromCFlow (IfStmt i cond _ (Label (tlbl, tbody)) (Just (Label (flbl, fbody)))) =
+fromCFlow (IfStmt i cond _ (Label (tlbl, tbody)) (Just (Label (flbl, fbody)))) symmap =
   let
     i'    = Q.Ident @Q.Label i
     tlbl' = Q.Ident @Q.Label tlbl
     flbl' = Q.Ident @Q.Label flbl
     flattened_cond = flattenExpr cond
-    cond' = foldMap fromExpr flattened_cond 
-    tbody' = Q.Block tlbl' (foldMap fromIROp tbody)
-    fbody' = Q.Block flbl' (foldMap fromIROp fbody)
+    cond' = foldMap (flip fromExpr symmap) flattened_cond 
+    tbody' = Q.Block tlbl' (foldMap (flip fromIROp symmap) tbody)
+    fbody' = Q.Block flbl' (foldMap (flip fromIROp symmap) fbody)
     cond_block = Q.Block i' (cond' <> [Q.Jump $ Q.Jnz (getCond $ last flattened_cond) tlbl' flbl'])
   in [cond_block, tbody', fbody']
   where
@@ -149,24 +158,24 @@ fromCFlow (IfStmt i cond _ (Label (tlbl, tbody)) (Just (Label (flbl, fbody)))) =
     getCond (FuncCall vi _ _ _) = Q.VTemp $ Q.Ident @Q.Temp vi
     getCond _ = error "Internal error - there should never be return/print/phi in condition."
 
-fromIROp :: IROp -> [Q.Instr]
-fromIROp (IRGoto n) = [Q.Jump $ Q.Jmp (Q.Ident @Q.Label n)]
-fromIROp (IRExpr e) = fromExpr e
-fromIROp (IRVar (Variable i _ (Bin _ t op l r))) = fromExpr $ Bin i t op l r
-fromIROp (IRVar (Variable i _ (Un _ t op v))) = fromExpr $ Un i t op v
-fromIROp (IRVar (Variable i _ (FuncCall _ t func vs))) = fromExpr $ FuncCall i t func vs
-fromIROp (IRVar (Variable i t v@((EVal _);(Ident _ _)))) =
+fromIROp :: IROp -> SymbolMap -> [Q.Instr]
+fromIROp (IRGoto n) _ = [Q.Jump $ Q.Jmp (Q.Ident @Q.Label n)]
+fromIROp (IRExpr e) symmap = fromExpr e symmap
+fromIROp (IRVar (Variable i _ (Bin _ t op l r))) symmap = flip fromExpr symmap $ Bin i t op l r
+fromIROp (IRVar (Variable i _ (Un _ t op v))) symmap = flip fromExpr symmap $ Un i t op v
+fromIROp (IRVar (Variable i _ (FuncCall _ t func vs))) symmap = flip fromExpr symmap $ FuncCall i t func vs
+fromIROp (IRVar (Variable i t v@((EVal _);(Ident _ _)))) _ =
   let
     t' = typeToPrim t
     i' = Q.Assignment (Q.Ident @Q.Temp i) (Q.AbiPrim t')
     v' = fromBasicExpr v
   in [Q.Unary i' Q.Copy v']
-fromIROp (IRVar _) = error "Internal error - there shouldn't be return/print/phi in variable."
+fromIROp (IRVar _) _ = error "Internal error - there shouldn't be return/print/phi in variable."
 
-fromExpr :: Expr -> [Q.Instr]
-fromExpr (Ret v) = [Q.Jump $ Q.Ret (Just $ fromBasicExpr v)]
-fromExpr (Print v) = [Q.Call Nothing (Q.Ident @Q.Global "printf") [Q.RegularParam (fromBasicExpr v) (Q.AbiPrim Q.PrimLong)]]
-fromExpr (Bin ident ty operator left right) = formatBinary ident ty operator left right
+fromExpr :: Expr -> SymbolMap -> [Q.Instr]
+fromExpr (Ret v) _ = [Q.Jump $ Q.Ret (Just $ fromBasicExpr v)]
+fromExpr (Print v) _ = [Q.Call Nothing (Q.Ident @Q.Global "printf") [Q.RegularParam (fromBasicExpr v) (Q.AbiPrim Q.PrimLong)]]
+fromExpr (Bin ident ty operator left right) _ = formatBinary ident ty operator left right
   where 
     formatBinary :: T.Text -> CT.Type -> CT.BinaryOp -> Expr -> Expr -> [Q.Instr]
     formatBinary i t op l r =
@@ -203,7 +212,7 @@ fromExpr (Bin ident ty operator left right) = formatBinary ident ty operator lef
     binaryToQBE CT.NotEql t = Q.CNe t
     binaryToQBE CT.Concat _ = error "figure out concat operator."
 
-fromExpr (Un ident ty operator value) = formatUnary ident ty operator value
+fromExpr (Un ident ty operator value) _ = formatUnary ident ty operator value
   where 
     formatUnary :: T.Text -> CT.Type -> CT.UnaryOp -> Expr -> [Q.Instr]
     formatUnary i t CT.Negate v =
@@ -218,9 +227,23 @@ fromExpr (Un ident ty operator value) = formatUnary ident ty operator value
         v' = fromBasicExpr v
          -- check equality to 0 (false)
       in [Q.Binary i' (Q.CEq t') v' (Q.VConst $ Q.CInt False 0)]
-fromExpr (Phi i t branches) =
+fromExpr (Format bufident (str, _) exprs) symmap =
+  let
+    bufident' = Q.RegularParam (Q.VConst . Q.CGlobal $ Q.Ident @Q.Global bufident) (Q.AbiByte Q.Unsigned)
+    str' = [bufident', Q.RegularParam (Q.VConst . Q.CGlobal $ Q.Ident @Q.Global str) (Q.AbiPrim Q.PrimLong), Q.VariadicParam]
+    exprs' = map exprToParam exprs
+  in [Q.Call Nothing (Q.Ident @Q.Global "sprintf") $ str' <> exprs']
+  where
+    exprToParam :: Expr -> Q.Param
+    exprToParam v@(EVal (Str _ _)) = Q.RegularParam (fromBasicExpr v) (Q.AbiPrim Q.PrimLong)
+    exprToParam v@((EVal (Chr _));(EVal (Integ _))) = Q.RegularParam (fromBasicExpr v) (Q.AbiPrim Q.PrimWord)
+    exprToParam v@(EVal (Flt _)) = Q.RegularParam (fromBasicExpr v) (Q.AbiPrim Q.PrimSingle)
+    exprToParam i@(Ident ident'' _) = 
+      let t = symmap M.! ident'' in
+      Q.RegularParam (fromBasicExpr i) (Q.AbiPrim $ typeToPrim t)
+fromExpr (Phi i t branches) _ =
   let
     i' = Q.Assignment (Q.Ident @Q.Temp i) (Q.AbiPrim $ typeToPrim t)
     branches' = map (\(lbl, value) -> ((Q.Ident @Q.Label lbl), fromBasicExpr value)) branches
   in [Q.Phi i' (NE.fromList branches')]
-fromExpr e = error $ "Internal error - unhandled expression: " <> (show e)
+fromExpr e _ = error $ "Internal error - unhandled expression: " <> (show e)

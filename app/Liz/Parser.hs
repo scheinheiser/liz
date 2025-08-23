@@ -59,7 +59,8 @@ lizReserved :: [T.Text]
 lizReserved = 
   [ "var", "set", "const", "if", "def", "return", "False",
     "True", "not", "negate", "Int", "Float", "String", 
-    "Char", "Bool", "Unit", "print", "block", "macro"]
+    "Char", "Bool", "Unit", "print", "block", "macro",
+    "format"]
 
 lizSymbols :: Parser Char
 lizSymbols = choice
@@ -101,6 +102,7 @@ parseExpr = parseValue <|> parseValueMacro <|> (between (char '(') (char ')') $
   choice [
     parseRet,
     parsePrint,
+    parseFormat,
     parseFuncCall
   ]) 
 
@@ -124,7 +126,7 @@ parseUnit = string "()"
 parseStr :: Parser T.Text
 parseStr = do
   _ <- char '"'
-  str <- takeWhile1P (Just "alphanumeric character.") valid
+  str <- takeWhileP (Just "alphanumeric character.") valid
   _ <- char '"'
   pure str
   where
@@ -180,6 +182,20 @@ parseRet = do
   v <- parseExpr
   e <- getCurrentLine
   pure $ EReturn (LizRange s e) v
+
+parseFormat :: Parser Expression
+parseFormat = do
+  s <- getCurrentLine
+  _ <- string "format"
+  hspace1
+  fstr <- parseStr
+  hspace1
+  args <- parseFormatArgs
+  e <- getCurrentLine
+  pure $ EFormat (LizRange s e) fstr args
+  where
+    parseFormatArgs :: Parser [Expression]
+    parseFormatArgs = parseExpr `sepBy` char ' '
 
 parseMacroDef :: Parser Macro
 parseMacroDef = do

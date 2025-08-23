@@ -72,13 +72,10 @@ analyseAndPrintErrs prog f ftext =
 
     inferFuncs :: [CT.Func] -> Env -> Int -> [Either [E.SemErr] CT.Type] -> ([E.SemErr], Int)
     inferFuncs [] _ i acc = (fold $ lefts acc, i)
-    inferFuncs (fn@CT.Func{funcIdent="main", funcReturnType=ret} : fs) env i acc =
+    inferFuncs (fn@CT.Func{funcIdent=ident} : fs) env i acc =
       let (result, env') = inferFunc fn env in 
-      inferFuncs fs env' (i + 1) (result : acc)
-      -- if ret /= L.Int' then inferFuncs fs env' (i + 1) (result : acc)
-      --                  else inferFuncs fs env' (i + 1) (Left [E.NonIntEntryPoint] : result : acc)
-    inferFuncs (fn : fs) env i acc =
-      let (result, env') = inferFunc fn env in inferFuncs fs env' i (result : acc)
+      if ident == "main" then inferFuncs fs env' (i + 1) (result : acc)
+                         else inferFuncs fs env' i (result : acc)
 
 -- TODO: Allow declarations in any order.
 analyseProgram :: CT.Program -> Either [E.SemErr] CT.Program
@@ -131,9 +128,14 @@ inferExpr (CT.ELiteral ty _ _) env = (Right ty, env)
 inferExpr (CT.EUnary op range v) env = checkUnary range op v env
 inferExpr (CT.EBinary op range l r) env = checkBinary range op l r env
 inferExpr (CT.EReturn _ v) env = inferExpr v env
-inferExpr (CT.EPrint _ _) env = (Right CT.Unit', env)
+inferExpr (CT.EPrint range e) env = 
+  case (inferExpr e env) of 
+    (Right CT.String', _) -> (Right CT.Unit', env)
+    (Right t, _) -> (Left [E.IncorrectType range CT.String' t], env)
+    (err@(Left _), _) -> (err, env)
 inferExpr (CT.EFuncCall range iden args) env = inferFuncCall range iden args env
 inferExpr (CT.EIdentifier iden range) env = inferIdentifier range iden env
+inferExpr (CT.EFormat _ _ _) env = (Right CT.String', env)
 
 inferIdentifier :: CT.LizRange -> T.Text -> Env -> (Either [E.SemErr] CT.Type, Env)
 inferIdentifier range iden env@(Env {envFuncs=fenv, envVars=venv, envConsts=cenv}) =

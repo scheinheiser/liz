@@ -74,7 +74,7 @@ checkReturns (f@CT.Func{funcIdent="main", funcBody=body, funcReturnType=ret, fun
   | hasReturn body = Left [E.ReturnInUnitMain] : checkReturns fs
   | otherwise =
     let body' = body <> [CT.SEExpr . CT.EReturn range $ CT.ELiteral CT.Int' "0" range] in
-    Right f{CT.funcBody=body'} : checkReturns fs
+    Right f{CT.funcBody=body', CT.funcReturnType=CT.Int'} : checkReturns fs
   where
     hasReturn :: [CT.SExpr] -> Bool
     hasReturn [] = False

@@ -61,7 +61,7 @@ irToQBE (IR funcs glbls strs _ _ _ symmap) =
               if "fbuf" `T.isPrefixOf` n
               then 
                 let (_, am) = T.breakOn ":" lit in
-              Q.DIZero (read @Int . T.unpack . T.drop 1 $ am)
+                Q.DIZero (read @Int . T.unpack . T.drop 1 $ am)
               else Q.DIString lit 
           in Q.DataDef (Q.Ident @Q.Global n) Nothing (NE.singleton lit')) strs
     glbls' = map (\(Variable i _ expr) -> Q.DataDef (Q.Ident @Q.Global i) Nothing (NE.singleton $ fromGlblValue expr)) glbls
@@ -229,7 +229,7 @@ fromExpr (Un ident ty operator value) _ = formatUnary ident ty operator value
       in [Q.Binary i' (Q.CEq t') v' (Q.VConst $ Q.CInt False 0)]
 fromExpr (Format bufident (str, _) exprs) symmap =
   let
-    bufident' = Q.RegularParam (Q.VConst . Q.CGlobal $ Q.Ident @Q.Global bufident) (Q.AbiByte Q.Unsigned)
+    bufident' = Q.RegularParam (Q.VConst . Q.CGlobal $ Q.Ident @Q.Global bufident) (Q.AbiPrim Q.PrimLong)
     str' = [bufident', Q.RegularParam (Q.VConst . Q.CGlobal $ Q.Ident @Q.Global str) (Q.AbiPrim Q.PrimLong), Q.VariadicParam]
     exprs' = map exprToParam exprs
   in [Q.Call Nothing (Q.Ident @Q.Global "sprintf") $ str' <> exprs']

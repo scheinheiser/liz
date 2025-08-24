@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Liz.IR.IRTypes (IR (..), Fn (..), Variable (..), IROp (..), CFlow (..), Expr (..), Val (..), Label (..), Goto) where
+module Liz.IR.IRTypes (IR (..), Fn (..), Variable (..), IROp (..), CFlow (..), Expr (..), Val (..), Label (..), Goto, SymbolMap) where
 
 import qualified Liz.Common.Types as CT
 import qualified Data.Text as T
@@ -11,6 +11,7 @@ import Prettyprinter
 type Goto = T.Text
 type LabelIdent = T.Text
 type InternalStringIdent = T.Text
+type SymbolMap = M.Map T.Text CT.Type
 newtype Label = Label (LabelIdent, [IROp]) -- name, expressions
   deriving Show
 
@@ -45,6 +46,7 @@ data Expr = Bin T.Text CT.Type CT.BinaryOp Expr Expr
   | Ident T.Text Bool -- name, flag if it's global.
   | EVal Val
   | Format T.Text (InternalStringIdent, T.Text) [Expr] -- interal buffer ident, (internal string ident, format string), format params
+  | BreakStmt T.Text
   deriving Show
 
 instance Pretty Expr where
@@ -60,24 +62,29 @@ instance Pretty Expr where
   pretty (Ret v) = (pretty @T.Text "ret") <+> (pretty v)
   pretty (Print v) = (pretty @T.Text "print") <+> (pretty v)
   pretty (Phi i t branches) = 
-    (pretty t) <+> (pretty i) <+> (pretty @T.Text "=") 
-        <+> (pretty @T.Text "phi") 
+    (pretty t) <+> (pretty i) 
+      <+> (pretty @T.Text "=") <+> (pretty @T.Text "phi") 
           <+> (hsep . punctuate comma $ map (\(b, r) -> (pretty b) <+> (pretty r)) branches)
   pretty (FuncCall _ _ i exprs) = 
     (pretty @T.Text i) 
       <> (parens . hsep . punctuate comma $ map pretty exprs)
   pretty (EVal v) = pretty v
-  pretty (Format _ (_, fstr) []) =
-    (pretty @T.Text "format") <> (parens $ pretty fstr)
-  pretty (Format _ (_, fstr) exprs) =
+  pretty (Format n (_, fstr) []) =
+    (pretty n) <+> (pretty @T.Text "=") 
+      <+> (pretty @T.Text "format") <> (parens $ pretty fstr)
+  pretty (Format n (_, fstr) exprs) =
     let body = pretty fstr : (map pretty exprs) in
-    (pretty @T.Text "format") <> (parens . hsep $ punctuate comma body)
+    (pretty n) <+> (pretty @T.Text "=") 
+      <+> (pretty @T.Text "format") <> (parens . hsep $ punctuate comma body)
+  pretty (BreakStmt n) =
+    (pretty @T.Text "break") <+> (pretty n)
 
 type IRBlock = [CFlow]
 
 data CFlow = IfStmt LabelIdent Expr Goto Label (Maybe Label) -- if statement id (for codegen) - cond - true branch - optional false branch
   | Lbl Label
   | BlockStmt LabelIdent IRBlock
+  | UntilStmt LabelIdent Expr Goto (Goto, [CFlow])
   deriving Show
 
 instance Pretty CFlow where
@@ -85,6 +92,7 @@ instance Pretty CFlow where
   pretty (Lbl lbl) = pretty lbl
   pretty (BlockStmt n exprs) =
     (pretty @T.Text $ n <> ":") <> line <> (indent 2 . vcat $ map pretty exprs)
+  pretty (UntilStmt n cond gotomain body) = formatUntilStmt n cond gotomain body
 
 data Variable = Variable T.Text CT.Type Expr
   deriving Show
@@ -123,7 +131,7 @@ data IR = IR
   , irStringIdx        :: !Int
   , irTempVarIdx       :: !Int -- to provide identifiers for temporary variables
   , irCFlowIdx         :: !Int -- to provide labels for control flow statements.
-  , irSymbols          :: M.Map T.Text CT.Type
+  , irSymbols          :: SymbolMap
   } deriving Show
 
 -- helper pretty functions
@@ -166,6 +174,25 @@ formatIfStmt id' cond _ tlbl@(Label (gototrue, _)) (Just (flbl@(Label (gotofalse
       <+> (pretty @T.Text "else goto") <+> (pretty gotofalse) 
         <> line <> (pretty $ Lbl tlbl) 
           <> (pretty flbl)
+
+formatUntilStmt :: T.Text -> Expr -> Goto -> (Goto, [CFlow]) -> Doc ann
+formatUntilStmt id' cond@(Bin ident _ _ _ _) gotomain (gotofirst, exprs) = 
+  (pretty cond) <> line 
+    <> (pretty id') <+> (pretty ident) 
+      <+> (pretty @T.Text "then goto") <+> (pretty gotofirst) 
+        <+> (pretty @T.Text "else goto") <+> (pretty gotomain)
+          <> line <> (indent 2 . vcat $ map pretty exprs) 
+formatUntilStmt id' cond@(Un ident _ _ _) gotomain (gotofirst, exprs) = 
+  (pretty cond) <> line 
+    <> (pretty id') <+> (pretty ident) 
+      <+> (pretty @T.Text "then goto") <+> (pretty gotofirst) 
+        <+> (pretty @T.Text "else goto") <+> (pretty gotomain)
+          <> line <> (indent 2 . vcat $ map pretty exprs) 
+formatUntilStmt id' cond gotomain (gotofirst, exprs) = 
+  (pretty id') <+> (pretty cond) 
+    <+> (pretty @T.Text "goto") <+> (pretty gotofirst) 
+      <+> (pretty @T.Text "otherwise goto") <+> (pretty gotomain)
+        <> line <> (indent 2 . vcat $ map pretty exprs) 
 
 binaryToText :: CT.BinaryOp -> T.Text
 binaryToText CT.Add = "+"

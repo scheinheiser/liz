@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Liz.Common.Logging where
+module Liz.Common.Logging (printErrs) where
 
 import qualified Text.Colour as C
 import qualified Data.Text as T

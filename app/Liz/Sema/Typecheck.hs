@@ -126,13 +126,6 @@ infer (CT.SEExpr ex) env = inferExpr ex env
 infer (CT.SEFlow (CT.FBlockStmt _ body)) env = inferBlock (NE.toList body) env
 infer (CT.SEFlow (CT.FIfStmt range cond tbr fbr)) env = inferIfStmt range cond tbr fbr env
 infer (CT.SEFlow (CT.FUntilStmt range n cond body)) env = inferUntilStmt range n cond body env
--- TODO: modify this to allow breaking the outermost loop within the innermost named loop.
-infer (CT.SEFlow (CT.FBreakStmt range n)) env@Env{envLoops=loops} =
-  case (S.pop loops) of
-    (Nothing, _) -> (Left [E.UndefinedIdentifier range n], env)
-    (Just top, loops')
-      | top /= n -> (Left [E.UndefinedIdentifier range n], env) 
-      | otherwise -> (Right CT.Unit', env{envLoops=loops'})
 infer (CT.SEVar range v) env = inferVariable range v env False
 infer (CT.SEConst range v) env = inferVariable range v env True
 infer (CT.SESet range i v) env = inferSet range i v env
@@ -151,6 +144,13 @@ inferExpr (CT.EPrint range e) env =
 inferExpr (CT.EFuncCall range iden args) env = inferFuncCall range iden args env
 inferExpr (CT.EIdentifier iden range) env = inferIdentifier range iden env
 inferExpr (CT.EFormat _ _ _) env = (Right CT.String', env)
+-- TODO: modify this to allow breaking the outermost loop within the innermost named loop.
+inferExpr (CT.EBreakStmt range n) env@Env{envLoops=loops} =
+  case (S.pop loops) of
+    (Nothing, _) -> (Left [E.UndefinedIdentifier range n], env)
+    (Just top, loops')
+      | top /= n -> (Left [E.UndefinedIdentifier range n], env) 
+      | otherwise -> (Right CT.Unit', env{envLoops=loops'})
 
 inferIdentifier :: CT.LizRange -> T.Text -> Env -> (Either [E.SemErr] CT.Type, Env)
 inferIdentifier range iden env@(Env {envFuncs=fenv, envVars=venv, envConsts=cenv}) =

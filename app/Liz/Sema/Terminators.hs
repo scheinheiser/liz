@@ -53,6 +53,7 @@ insertReturns = map aux
         fbranch' = handleSExpr fbranch 
       in
       CT.FIfStmt r cond tbranch' (Just fbranch')
+    handleFlow cflow = cflow
 
     handleExpr :: CT.Expression -> CT.Expression
     handleExpr v@(CT.EBinary _ r _ _) = CT.EReturn r v
@@ -68,6 +69,7 @@ checkReturns (f@CT.Func{funcIdent="main", funcBody=body, funcReturnType=CT.Int'}
     (CT.SESet range _ _) -> Left [E.InvalidReturn range] : checkReturns fs
     (CT.SEVar range _) -> Left [E.InvalidReturn range] : checkReturns fs
     (CT.SEConst range _) -> Left [E.InvalidReturn range] : checkReturns fs
+    (CT.SEFlow (CT.FUntilStmt range _ _ _)) -> Left [E.InvalidReturn range] : checkReturns fs
     _ -> Right f : checkReturns fs
 checkReturns (f@CT.Func{funcIdent="main", funcBody=body, funcReturnType=ret, funcPos=range} : fs)
   | ret /= CT.Unit' = Left [E.NonUnitOrIntMain] : checkReturns fs
@@ -95,4 +97,5 @@ checkReturns (f@CT.Func{funcBody=body} : fs) =
     (CT.SESet range _ _) -> Left [E.InvalidReturn range] : checkReturns fs
     (CT.SEVar range _) -> Left [E.InvalidReturn range] : checkReturns fs
     (CT.SEConst range _) -> Left [E.InvalidReturn range] : checkReturns fs
+    (CT.SEFlow (CT.FUntilStmt range _ _ _)) -> Left [E.InvalidReturn range] : checkReturns fs
     _ -> Right f : checkReturns fs

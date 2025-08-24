@@ -61,7 +61,7 @@
   (loop until (< 10 loop_cond)
     (print loop_cond))
 
-  (loop myloop until True
+  (loop 'myloop until True
     (print "printing in a named loop!")
     (break 'myloop))
 

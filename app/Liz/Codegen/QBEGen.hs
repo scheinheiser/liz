@@ -20,8 +20,6 @@ import Unsafe.Coerce (unsafeCoerce)
 import Data.Word
 import Data.Char (ord)
 
-type SymbolMap = M.Map T.Text CT.Type
-
 typeToPrim :: CT.Type -> Q.Prim
 typeToPrim CT.Int' = Q.PrimWord
 typeToPrim CT.Float' = Q.PrimSingle

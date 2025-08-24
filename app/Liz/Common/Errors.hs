@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
 
-module Liz.Common.Errors where
+module Liz.Common.Errors (SemErr (..), PError (..)) where
 
 import qualified Data.Text as T
 

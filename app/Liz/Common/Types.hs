@@ -99,12 +99,12 @@ data Expression = EBinary BinaryOp LizRange Expression Expression
   | EFormat     LizRange T.Text [Expression] -- format string - values
   | EIdentifier T.Text LizRange
   | EValueMacro T.Text LizRange
+  | EBreakStmt  LizRange T.Text
   deriving (Show, Eq)
 
 data ControlFlow = FBlockStmt LizRange (NE.NonEmpty SExpr)
   | FIfStmt    LizRange Expression SExpr (Maybe SExpr) -- cond - truebranch - optional falsebranch
   | FUntilStmt LizRange (Maybe T.Text) Expression [SExpr] -- optional name - condition - loop body
-  | FBreakStmt LizRange T.Text
   deriving (Show, Eq)
 
 data SExpr = SEComment

@@ -16,6 +16,9 @@ import qualified Prettyprinter as PP
 import Prettyprinter.Render.Text (putDoc)
 
 -- helper functions
+head' :: [a] -> a
+head' = NE.head . NE.fromList
+
 labelSuffix :: Int -> T.Text
 labelSuffix index = "L" <> (T.show index)
 
@@ -60,7 +63,7 @@ getType _ e = error $ "called getType with unexpected expr: " <> (show e)
 fromSExpr :: CT.SExpr -> IR -> Label -> ([CFlow], IR, Label)
 fromSExpr (CT.SEExpr ex) ir (Label (n, exprs)) =
   let (ex', ir') = fromExpr ex ir in
-  ([], ir', Label (n, (IRExpr ex') : exprs))
+  ([], ir', Label (n, exprs <> [IRExpr ex']))
 fromSExpr (CT.SEFlow flow) ir old_lbl@(Label (_, exprs)) =
   let (ex', ir'@IR{irCFlowIdx=i}) = fromCFlow flow ir in
   if length exprs /= 0 
@@ -72,20 +75,20 @@ fromSExpr (CT.SEVar _ CT.Var{varIdent = ident, varType = t, varValue = v}) ir@IR
     var = IRVar $ Variable ident t v'
     symmap' = ident `M.insert` t $ symmap
   in
-  ([], ir'{irSymbols=symmap'}, Label (n, var : exprs))
+  ([], ir'{irSymbols=symmap'}, Label (n, exprs <> [var]))
 fromSExpr (CT.SESet _ ident v) ir@IR{irSymbols=symmap} (Label (n, exprs)) =
   let 
     (v', ir') = fromExpr v ir 
     var = IRVar $ Variable ident (symmap M.! ident) v'
   in
-  ([], ir', Label (n, var : exprs))
+  ([], ir', Label (n, exprs <> [var]))
 fromSExpr (CT.SEConst _ CT.Var{varIdent = ident, varType = t, varValue = v}) ir@IR{irSymbols=symmap} (Label (n, exprs)) =
   let 
     (v', ir') = fromExpr v ir
     symmap' = ident `M.insert` t $ symmap
     var = IRVar $ Variable ident t v'
   in
-  ([], ir'{irSymbols=symmap'}, Label (n, var : exprs))
+  ([], ir'{irSymbols=symmap'}, Label (n, exprs <> [var]))
 
 fromCFlow :: CT.ControlFlow -> IR -> (CFlow, IR)
 fromCFlow (CT.FIfStmt _ cond tbranch Nothing) ir@IR{irCFlowIdx=fi} =
@@ -109,6 +112,19 @@ fromCFlow (CT.FBlockStmt _ vals) ir@IR{irCFlowIdx=fi} =
     (body, ir') = translateBody (reverse . NE.toList $ vals) ir
   in
   (BlockStmt flowidx body, ir'{irCFlowIdx=fi + 1})
+fromCFlow (CT.FUntilStmt _ n cond body) ir@IR{irCFlowIdx=fi} =
+  let
+    flowidx = 
+      case n of
+        Nothing -> "until$" <> (T.show fi)
+        Just n' -> "until$" <> n'
+    endblockidx = "end$" <> flowidx
+    (cond', ir') = fromExpr cond ir
+    (body', ir'') = translateBody body ir'
+    body'' = body' <> [(Lbl $ Label (endblockidx, [IRGoto flowidx]))]
+    gotomain = "blank"
+    gotofirst = "blank"
+  in (UntilStmt flowidx cond' gotomain (gotofirst, body''), ir'')
 
 fromExpr :: CT.Expression -> IR -> (Expr, IR)
 fromExpr (CT.EIdentifier ident _) ir@IR{irGlbls=glbls} =
@@ -194,10 +210,11 @@ fromExpr (CT.EFormat _ fstr params) ir =
           ((ir'', ex : acc), p)) (ir, []) (reverse params)
     bufident = "fbuf" <> (T.show si) -- no need to increment, as it's different from typical strings
     bufstring = "__buffer:" <> (T.show $ T.length fstr + 1) -- increment for null terminator
-    fstr' = "str" <> (T.show si)
+    fstr' = "str" <> (T.show $ si + 1)
     strs' = reverse $ (bufstring, bufident) : (fstr, fstr') : strs
   in
-  (Format bufident (fstr', "\"" <> fstr <> "\"") params', ir'''{irStringIdx=si + 1, irAllocatedStrings=strs'})
+  (Format bufident (fstr', "\"" <> fstr <> "\"") params', ir'''{irStringIdx=si + 2, irAllocatedStrings=strs'})
+fromExpr (CT.EBreakStmt _ n) ir = (BreakStmt n, ir)
 
 -- FIX: detect if there's nested if statements
 patchJumps :: [CFlow] -> IR -> [CFlow]
@@ -208,27 +225,36 @@ patchJumps c = aux (reverse c)
     aux (stmt : rest@((IfStmt n _ _ _ _) : _)) ir = (patchCFlow stmt n ir) : (aux rest ir)
     aux (stmt : rest@((Lbl (Label (n, _))) : _)) ir = (patchCFlow stmt n ir) : (aux rest ir)
     aux (stmt : rest@((BlockStmt n _) : _)) ir = (patchCFlow stmt n ir) : (aux rest ir)
+    aux (stmt : rest@((UntilStmt n _ _ _) : _)) ir = (patchCFlow stmt n ir) : (aux rest ir)
     aux (expr : rest) ir = expr : aux rest ir
 
     patchCFlow :: CFlow -> T.Text -> IR -> CFlow
     patchCFlow (IfStmt id' cond _ (Label (gototrue, exprs)) Nothing) next _ =
       let patched_exprs = exprs <> [IRGoto next] in
-      (IfStmt id' cond next (Label (gototrue, patched_exprs)) Nothing)
+      IfStmt id' cond next (Label (gototrue, patched_exprs)) Nothing
     patchCFlow (IfStmt id' cond _ (Label (gototrue, texprs)) (Just (Label (gotofalse, fexprs)))) next _ =
       let 
         patched_texprs = texprs <> [IRGoto next] 
         patched_fexprs = fexprs <> [IRGoto next] 
-      in (IfStmt id' cond next (Label (gototrue, patched_texprs)) (Just (Label (gotofalse, patched_fexprs))))
+      in IfStmt id' cond next (Label (gototrue, patched_texprs)) (Just (Label (gotofalse, patched_fexprs)))
     patchCFlow (BlockStmt id' exprs) next ir =
       let 
         gotoend = [Lbl $ Label ("end$" <> id', [IRGoto next])]
         patched_exprs = aux exprs ir 
         patched_exprs' = aux (patched_exprs <> gotoend) ir
       in
-      (BlockStmt id' patched_exprs')
+      BlockStmt id' patched_exprs'
     patchCFlow (Lbl (Label (n, exprs))) next _ =
       let patched_exprs = exprs <> [IRGoto next] in
-      (Lbl $ Label (n, patched_exprs))
+      Lbl $ Label (n, patched_exprs)
+    patchCFlow (UntilStmt id' cond _ (_, exprs)) next ir =
+      let patched_exprs = aux exprs ir in
+      UntilStmt id' cond next (getLabel $ head' patched_exprs, patched_exprs)
+      where
+        getLabel (IfStmt i _ _ _ _) = i
+        getLabel (BlockStmt i _) = i
+        getLabel (Lbl (Label (i, _))) = i
+        getLabel (UntilStmt i _ _ _) = i
 
 -- TODO: change to return nonempty
 flattenExpr :: Expr -> [Expr]
@@ -304,13 +330,16 @@ programToIR (CT.Program funcs glbls _) =
     flattenBody :: [CFlow] -> [CFlow]
     flattenBody [] = []
     flattenBody ((Lbl (Label (n, exprs))) : cs) = Lbl (Label (n, flattenIROp exprs)) : (flattenBody cs)
-    flattenBody ((BlockStmt i exprs) : cs) = BlockStmt i (reverse . flattenBody $ exprs) : (flattenBody cs)
+    flattenBody ((BlockStmt i exprs) : cs) = BlockStmt i (flattenBody $ exprs) : (flattenBody cs)
     flattenBody (IfStmt i cond main (Label (tlbl, texprs)) (Just (Label (flbl, fexprs))) : cs) =
       -- we delay flattening the condition.
       -- doing it now presents some cases which I think aren't solvable/would be annoying to catch (e.g. back-to-back if statements)
       IfStmt i cond main (Label (tlbl, flattenIROp texprs)) (Just $ Label (flbl, flattenIROp fexprs)) : flattenBody cs
     flattenBody ((IfStmt i cond main (Label (tlbl, texprs)) Nothing) : cs) =
       IfStmt i cond main (Label (tlbl, flattenIROp texprs)) Nothing : flattenBody cs
+    flattenBody (UntilStmt i cond main (first, exprs) : cs) =
+      -- we delay flattening the condition.
+      UntilStmt i cond main (first, (flattenBody $ exprs)) : flattenBody cs
 
 ppIR :: CT.Program -> IO ()
 ppIR prog =

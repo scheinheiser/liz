@@ -60,7 +60,7 @@ lizReserved =
   [ "var", "set", "const", "if", "def", "return", "False",
     "True", "not", "negate", "Int", "Float", "String", 
     "Char", "Bool", "Unit", "print", "block", "macro",
-    "format"]
+    "format", "loop", "until", "for"]
 
 lizSymbols :: Parser Char
 lizSymbols = choice
@@ -217,7 +217,6 @@ parseComment = do
     valid :: Char -> Bool
     valid = liftA2 (||) isPrint ('\n' /=)
 
--- TODO: refactor parsing to remove the need for SEType.
 parseVarDecl :: Parser (LizRange -> Var -> a) -> Parser Expression -> Parser a
 parseVarDecl dec varParse = do
   s <- getCurrentLine
@@ -225,18 +224,22 @@ parseVarDecl dec varParse = do
   hspace1
   ident <- parseIdent False
   hspace1 
-  ty <- (liftM SEType parseType) <|> (liftM SEExpr varParse)
+  ty <- optional parseType
   aux decType s ident ty
   where
-    aux decl s iden (SEType ty) = do
+    aux decl s iden (Just ty') = do
       _ <- some hspace1
       value <- L.lineFold scn $ \_ -> varParse
       e <- getCurrentLine
-      pure $ decl (LizRange s e) Var{varIdent=iden, varType=ty, varValue=value}
-    aux decl s iden (SEExpr lit@(ELiteral ty _ _)) = do
+      pure $ decl (LizRange s e) Var{varIdent=iden, varType=ty', varValue=value}
+    aux decl s iden Nothing = do
+      lit <- varParse
+      ty <- getType lit
       e <- getCurrentLine
       pure $ decl (LizRange s e) Var{varIdent=iden, varType=ty, varValue=lit}
-    aux _ _ _ op = unsupportedDeclaration $ T.show op
+      where
+        getType (ELiteral ty _ _) = pure ty
+        getType op = unsupportedDeclaration $ T.show op
 
 parseSetStmt :: Parser SExpr
 parseSetStmt = do
@@ -369,6 +372,35 @@ parseIfStmt = do
                 in
                 pure $ SEFlow $ FIfStmt (LizRange s e) cond truebr (Just falsebr)
 
+-- TODO: expand this to support for loops
+parseLoop :: Parser SExpr
+parseLoop = do
+  s <- getCurrentLine
+  _ <- string "loop"
+  hspace1
+  name <- optional parseLoopName
+  hspace
+  _ <- string "until"
+  hspace1
+  cond <- parseExpr
+  body <- some $ L.lineFold scn $ \_ -> parseSExpr
+  e <- getCurrentLine
+  pure $ SEFlow $ FUntilStmt (LizRange s e) name cond body
+  where
+    parseLoopName :: Parser T.Text
+    parseLoopName = char '\'' >> parseIdent False
+
+parseBreak :: Parser SExpr
+parseBreak = do
+  s <- getCurrentLine
+  _ <- string "break"
+  hspace1
+  n <- parseLoopName
+  pure $ SEFlow $ FBreak (LizRange s s) n -- there's no way for it to span more than a line.
+  where
+    parseLoopName :: Parser T.Text
+    parseLoopName = char '\'' >> parseIdent False
+
 parseSExpr :: Parser SExpr
 parseSExpr = (between (char '(') (char ')') $ 
   label "valid S-Expression" 
@@ -378,6 +410,8 @@ parseSExpr = (between (char '(') (char ')') $
             , SEExpr <$> parseRet
             , SEExpr <$> parsePrint
             , parseBlock
+            , parseLoop
+            , parseBreak
             , SEExpr <$> parseFuncCall
             ])) <|> parseComment
 

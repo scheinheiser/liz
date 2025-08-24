@@ -8,6 +8,8 @@
 - [x] Add syntax to define custom operators (maybe `(def (<$>) [...] (...))` ?)
 - [x] Add `block` keyword for a block of expressions.
 - [x] Add `macro` and `call-macro` keyword.
+- [ ] Loops! `for` and `while` loops.
+- [x] Consider allowing named loops. (added)
 
 ## Semantic Analysis
 - [x] Check that there's a `main` func, check that variables outside have the global tag? Up for change, really. (main checking is implemented)
@@ -17,8 +19,9 @@
 - [x] Type checking.
 - [x] Pretty errors.
 - [x] Macro substitution
+- [ ] More complex macro subbing (function-like macros)
 - [ ] Allow declarations in any order.
-- [ ] Insert returns in functions.
+- [x] Insert returns in functions.
 
 ## IR
 - [x] Decide on block-style or label-style IR.
@@ -30,5 +33,5 @@
 - [x] Decide between using LLVM or asm for IL. (using QBE instead)
 - [x] Make a QBE pretty printing library.
 - [x] Compile simple expressions (i.e. arithmetic, boolean stuff).
-- [ ] Compile complex expressions (i.e. nested stuff, functions).
-- [ ] Compile and run the first working liz executable!
+- [x] Compile complex expressions (i.e. nested stuff, functions).
+- [x] Compile and run the first working liz executable!

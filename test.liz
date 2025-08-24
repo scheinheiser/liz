@@ -57,5 +57,13 @@
     (print "this won't be run")
     (print "this will be run"))
 
+  (var loop_cond Int 0)
+  (loop until (< 10 loop_cond)
+    (print loop_cond))
+
+  (loop myloop until True
+    (print "printing in a named loop!")
+    (break 'myloop))
+
   (print (== 4 (decrement (increment 4)))) ; would print "True"
   (return ()))

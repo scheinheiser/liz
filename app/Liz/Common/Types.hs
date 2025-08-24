@@ -103,6 +103,8 @@ data Expression = EBinary BinaryOp LizRange Expression Expression
 
 data ControlFlow = FBlockStmt LizRange (NE.NonEmpty SExpr)
   | FIfStmt    LizRange Expression SExpr (Maybe SExpr) -- cond - truebranch - optional falsebranch
+  | FUntilStmt LizRange (Maybe T.Text) Expression [SExpr] -- optional name - condition - loop body
+  | FBreak     LizRange T.Text
   deriving (Show, Eq)
 
 data SExpr = SEComment
@@ -111,5 +113,4 @@ data SExpr = SEComment
   | SEConst     LizRange Var
   | SESet       LizRange T.Text Expression
   | SEFlow      ControlFlow
-  | SEType      Type
   deriving (Show, Eq)

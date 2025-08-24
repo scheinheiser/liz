@@ -121,7 +121,6 @@ infer (CT.SEVar range v) env = inferVariable range v env False
 infer (CT.SEConst range v) env = inferVariable range v env True
 infer (CT.SESet range i v) env = inferSet range i v env
 infer CT.SEComment env = (Right CT.String', env)
-infer s env = (Left [E.NotImplemented s], env)
 
 inferExpr :: CT.Expression -> Env -> (Either [E.SemErr] CT.Type, Env)
 inferExpr (CT.ELiteral ty _ _) env = (Right ty, env)

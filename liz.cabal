@@ -18,13 +18,14 @@ executable liz
       , Liz.Common.Types
       , Liz.Common.Errors
       , Liz.Common.Logging
+      , Liz.Util.Stack
       , Liz.Sema.Typecheck
       , Liz.Sema.Macro
       , Liz.Sema.Terminators
-      , Liz.Codegen
-      , Liz.IR.IR
       , Liz.IR.IRTypes
-      , Liz.QBE.QBE
+      , Liz.IR.IRGen
+      , Liz.Codegen.QBE
+      , Liz.Codegen.QBEGen
     other-extensions: OverloadedStrings
       , NamedDefaults
       , RecordWildCards
@@ -43,18 +44,19 @@ test-suite liz-test
     import:           warnings
     default-language: GHC2024
     other-modules: Liz.Parser
-      , Liz.ParserSpec
-      , Liz.Sema.Typecheck
-      , Liz.Sema.Macro
-      , Liz.Sema.Terminators
-      , Liz.Codegen
-      , Liz.IR.IR
-      , Liz.IR.IRTypes
-      , Liz.QBE.QBE
-      , Liz.SemaSpec
       , Liz.Common.Errors
       , Liz.Common.Logging
       , Liz.Common.Types
+      , Liz.Util.Stack
+      , Liz.Sema.Typecheck
+      , Liz.Sema.Macro
+      , Liz.Sema.Terminators
+      , Liz.IR.IRTypes
+      , Liz.IR.IRGen
+      , Liz.Codegen.QBE
+      , Liz.Codegen.QBEGen
+      , Liz.SemaSpec
+      , Liz.ParserSpec
     other-extensions: OverloadedStrings, MultilineStrings
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test, app

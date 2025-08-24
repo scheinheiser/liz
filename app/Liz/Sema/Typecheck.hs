@@ -3,17 +3,17 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OrPatterns #-}
 
-module Liz.Sema.Typecheck where
+module Liz.Sema.Typecheck (analyseAndPrintErrs, analyseProgram) where
 
 import qualified Liz.Common.Errors as E
 import qualified Liz.Common.Logging as Log
 import qualified Liz.Common.Types as CT
+import qualified Liz.Util.Stack as S
 
 import Liz.Sema.Macro
 import Liz.Sema.Terminators
 
 import qualified Data.Map as M
-import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.List.NonEmpty as NE
 
@@ -25,10 +25,13 @@ data Env = Env
   { envFuncs  :: M.Map T.Text (CT.Type, [CT.Type])
   , envVars   :: M.Map T.Text CT.Type
   , envConsts :: M.Map T.Text CT.Type
-  , envLoops  :: S.Set T.Text -- TODO: use a stack structure for this, instead of a set
+  , envLoops  :: S.Stack T.Text
   } deriving (Show, Eq)
 
 -- helper sema functions
+head' :: [a] -> a
+head' = NE.head . NE.fromList
+
 mkEnv :: Env
 mkEnv = Env {envFuncs = M.empty, envVars = M.empty, envConsts = M.empty, envLoops = S.empty}
 
@@ -123,9 +126,13 @@ infer (CT.SEExpr ex) env = inferExpr ex env
 infer (CT.SEFlow (CT.FBlockStmt _ body)) env = inferBlock (NE.toList body) env
 infer (CT.SEFlow (CT.FIfStmt range cond tbr fbr)) env = inferIfStmt range cond tbr fbr env
 infer (CT.SEFlow (CT.FUntilStmt range n cond body)) env = inferUntilStmt range n cond body env
-infer (CT.SEFlow (CT.FBreakStmt range n)) env@Env{envLoops=loops}
-  | n `S.notMember` loops = (Left [E.UndefinedIdentifier range n], env)
-  | otherwise = (Right CT.Unit', env)
+-- TODO: modify this to allow breaking the outermost loop within the innermost named loop.
+infer (CT.SEFlow (CT.FBreakStmt range n)) env@Env{envLoops=loops} =
+  case (S.pop loops) of
+    (Nothing, _) -> (Left [E.UndefinedIdentifier range n], env)
+    (Just top, loops')
+      | top /= n -> (Left [E.UndefinedIdentifier range n], env) 
+      | otherwise -> (Right CT.Unit', env{envLoops=loops'})
 infer (CT.SEVar range v) env = inferVariable range v env False
 infer (CT.SEConst range v) env = inferVariable range v env True
 infer (CT.SESet range i v) env = inferSet range i v env
@@ -339,7 +346,7 @@ inferUntilStmt range Nothing cond body env =
         then (Left errs, env)
         else (Right $ last types, env)
 inferUntilStmt range (Just n) cond body env@Env{envLoops=loops} =
-  case (inferExpr cond env, n `S.member` loops) of
+  case (inferExpr cond env, loops `S.contains` n) of
     ((Left errs, _), True) -> (Left $ (E.IdentifierAlreadyInUse range n) : errs, env)
     ((errs@(Left _), _), False) -> (errs, env)
     ((Right _, _), True) -> (Left [E.IdentifierAlreadyInUse range n], env)
@@ -348,7 +355,7 @@ inferUntilStmt range (Just n) cond body env@Env{envLoops=loops} =
       | otherwise ->
         let 
           -- add the loop name before evaluating the body in case of any breaks
-          env' = env{envLoops = n `S.insert` loops}
+          env' = env{envLoops = n `S.push` loops}
           (errs, types) = collectErrors $ inferBody body env'
         in if length errs /= 0 then (Left errs, env')
                                else (Right $ last types, env')

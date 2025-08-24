@@ -3,7 +3,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OrPatterns #-}
 
-module Liz.Sema.Macro where
+module Liz.Sema.Macro (substituteMacros, collectErrors) where
 
 import qualified Liz.Common.Errors as E
 import qualified Liz.Common.Types as CT
@@ -26,10 +26,6 @@ mkMacroTbl = M.empty
 
 head' :: [a] -> a
 head' = NE.head . NE.fromList
-
--- if there's a 'none' value, then it must be a macro definition.
-hasMacroDef :: Eq a => [Maybe a] -> Bool
-hasMacroDef = (0 /=) . length . filter (Nothing ==)
 
 populateMacroTbl :: [CT.Macro] -> Either [E.SemErr] MacroTbl
 populateMacroTbl macros = aux macros mkMacroTbl []

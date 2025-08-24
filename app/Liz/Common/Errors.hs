@@ -32,6 +32,7 @@ data SemErr = IncorrectType LizRange Type Type -- expected type ; given type
   | InvalidReturn LizRange
   | NonUnitOrIntMain
   | ReturnInUnitMain
+  | InvalidUntilStmt LizRange
   deriving (Show, Eq)
 
 data PError = FailedTypeInference T.Text

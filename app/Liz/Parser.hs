@@ -396,7 +396,7 @@ parseBreak = do
   _ <- string "break"
   hspace1
   n <- parseLoopName
-  pure $ SEFlow $ FBreak (LizRange s s) n -- there's no way for it to span more than a line.
+  pure $ SEFlow $ FBreakStmt (LizRange s s) n -- there's no way for it to span more than a line.
   where
     parseLoopName :: Parser T.Text
     parseLoopName = char '\'' >> parseIdent False

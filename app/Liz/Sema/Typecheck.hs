@@ -13,6 +13,7 @@ import Liz.Sema.Macro
 import Liz.Sema.Terminators
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.List.NonEmpty as NE
 
@@ -24,11 +25,12 @@ data Env = Env
   { envFuncs  :: M.Map T.Text (CT.Type, [CT.Type])
   , envVars   :: M.Map T.Text CT.Type
   , envConsts :: M.Map T.Text CT.Type
+  , envLoops  :: S.Set T.Text -- TODO: use a stack structure for this, instead of a set
   } deriving (Show, Eq)
 
 -- helper sema functions
 mkEnv :: Env
-mkEnv = Env {envFuncs = M.empty, envVars = M.empty, envConsts = M.empty}
+mkEnv = Env {envFuncs = M.empty, envVars = M.empty, envConsts = M.empty, envLoops = S.empty}
 
 inferBody :: [CT.SExpr] -> Env -> [Either [E.SemErr] CT.Type]
 inferBody exprs env = 
@@ -73,9 +75,12 @@ analyseAndPrintErrs prog f ftext =
     inferFuncs :: [CT.Func] -> Env -> Int -> [Either [E.SemErr] CT.Type] -> ([E.SemErr], Int)
     inferFuncs [] _ i acc = (fold $ lefts acc, i)
     inferFuncs (fn@CT.Func{funcIdent=ident} : fs) env i acc =
-      let (result, env') = inferFunc fn env in 
-      if ident == "main" then inferFuncs fs env' (i + 1) (result : acc)
-                         else inferFuncs fs env' i (result : acc)
+      let 
+        (result, env') = inferFunc fn env
+        env'' = env'{envLoops = S.empty} -- refresh the loop names in each function
+      in 
+      if ident == "main" then inferFuncs fs env'' (i + 1) (result : acc)
+                         else inferFuncs fs env'' i (result : acc)
 
 -- TODO: Allow declarations in any order.
 analyseProgram :: CT.Program -> Either [E.SemErr] CT.Program
@@ -117,6 +122,10 @@ infer :: CT.SExpr -> Env -> (Either [E.SemErr] CT.Type, Env)
 infer (CT.SEExpr ex) env = inferExpr ex env
 infer (CT.SEFlow (CT.FBlockStmt _ body)) env = inferBlock (NE.toList body) env
 infer (CT.SEFlow (CT.FIfStmt range cond tbr fbr)) env = inferIfStmt range cond tbr fbr env
+infer (CT.SEFlow (CT.FUntilStmt range n cond body)) env = inferUntilStmt range n cond body env
+infer (CT.SEFlow (CT.FBreakStmt range n)) env@Env{envLoops=loops}
+  | n `S.notMember` loops = (Left [E.UndefinedIdentifier range n], env)
+  | otherwise = (Right CT.Unit', env)
 infer (CT.SEVar range v) env = inferVariable range v env False
 infer (CT.SEConst range v) env = inferVariable range v env True
 infer (CT.SESet range i v) env = inferSet range i v env
@@ -311,7 +320,35 @@ inferIfStmt range cond tbranch (Just fbranch) env =
     (err@((Left _), _), _, _) -> err
     (_, err@(Left _, _), _) -> err
     (_, _, err@(Left _, _)) -> err
-    ((Right tccond, _), (Right tctbr, _), (Right tcfbr, env')) | tccond /= CT.Bool' && tctbr /= tcfbr -> (Left [E.IncorrectType range CT.Bool' tccond, E.IncorrectType range tctbr tcfbr], env')
-                                                               | tccond /= CT.Bool' -> (Left [E.IncorrectType range CT.Bool' tccond], env')
-                                                               | tctbr /= tcfbr -> (Left [E.IncorrectType range tctbr tcfbr], env')
-                                                               | otherwise -> (Right tcfbr, env')
+    ((Right cond', _), (Right tbranch', _), (Right fbranch', env')) 
+      | cond' /= CT.Bool' && tbranch' /= fbranch' -> (Left [E.IncorrectType range CT.Bool' cond', E.IncorrectType range tbranch' fbranch'], env')
+      | cond' /= CT.Bool' -> (Left [E.IncorrectType range CT.Bool' cond'], env')
+      | tbranch' /= fbranch' -> (Left [E.IncorrectType range tbranch' fbranch'], env')
+      | otherwise -> (Right fbranch', env')
+
+inferUntilStmt :: CT.LizRange -> Maybe T.Text -> CT.Expression -> [CT.SExpr] -> Env -> (Either [E.SemErr] CT.Type, Env)
+inferUntilStmt range _ (CT.EReturn _ _) _ env = (Left [E.InvalidUntilStmt range], env)
+inferUntilStmt range Nothing cond body env =
+  case (inferExpr cond env) of
+    (err@(Left _), _) -> (err, env)
+    (Right ty, _) 
+      | ty /= CT.Bool' -> (Left [E.IncorrectType range CT.Bool' ty], env)
+      | otherwise ->
+        let (errs, types) = collectErrors $ inferBody body env in
+        if length errs /= 0 
+        then (Left errs, env)
+        else (Right $ last types, env)
+inferUntilStmt range (Just n) cond body env@Env{envLoops=loops} =
+  case (inferExpr cond env, n `S.member` loops) of
+    ((Left errs, _), True) -> (Left $ (E.IdentifierAlreadyInUse range n) : errs, env)
+    ((errs@(Left _), _), False) -> (errs, env)
+    ((Right _, _), True) -> (Left [E.IdentifierAlreadyInUse range n], env)
+    ((Right ty, _), False)
+      | ty /= CT.Bool' -> (Left [E.IncorrectType range CT.Bool' ty], env)
+      | otherwise ->
+        let 
+          -- add the loop name before evaluating the body in case of any breaks
+          env' = env{envLoops = n `S.insert` loops}
+          (errs, types) = collectErrors $ inferBody body env'
+        in if length errs /= 0 then (Left errs, env')
+                               else (Right $ last types, env')

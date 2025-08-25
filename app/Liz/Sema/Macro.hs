@@ -71,7 +71,7 @@ simpleSub dec v tbl =
 multiSub :: (a -> MacroTbl -> (Either [E.SemErr] a, MacroTbl)) -> ([a] -> a) -> [a] -> MacroTbl -> (Either [E.SemErr] a, MacroTbl)
 multiSub subFunc dec body tbl =
   let 
-    subbed_body = subBody subFunc body tbl 
+    subbed_body = reverse . subBody subFunc body $ tbl 
     (errs, subbed_body')  = collectErrors subbed_body
   in
   if length errs /= 0 
@@ -110,7 +110,7 @@ substituteMacros (CT.Program funcs glbls macros) = do
     subFuncs (f@CT.Func{funcBody=body} : fs) tbl =
       let (errs, body') = collectErrors $ subBody macroSub body tbl in
       if length errs /= 0 then (Left errs) : subFuncs fs tbl
-                          else (Right f{CT.funcBody=body'}) : subFuncs fs tbl
+                          else (Right f{CT.funcBody=reverse body'}) : subFuncs fs tbl
 
 macroSub :: CT.SExpr -> MacroTbl -> (Either [E.SemErr] CT.SExpr, MacroTbl)
 macroSub (CT.SEExpr ex) tbl = let (res, tbl') = macroSubExpr ex tbl in (CT.SEExpr <$> res, tbl')
@@ -163,6 +163,22 @@ macroSub (CT.SEFlow (CT.FIfStmt range cond tbranch (Just fbranch))) tbl =
                   filtered_tbranch = head' subbed_tbranch'
                   filtered_fbranch = head' subbed_fbranch'
                   expr = CT.SEFlow $ CT.FIfStmt range filtered_cond filtered_tbranch (Just filtered_fbranch)
+                in (Right expr, tbl)
+macroSub (CT.SEFlow (CT.FUntilStmt range n cond body)) tbl =
+  let
+    (subbed_cond, _) = macroSubExpr cond tbl
+    subbed_body = reverse . subBody macroSub body $ tbl
+    (cond_err, subbed_cond') = collectErrors [subbed_cond]
+    (body_err, subbed_body') = collectErrors subbed_body
+  in
+  case () of _
+              | length cond_err /= 0 && length body_err /= 0 -> (Left $ cond_err <> body_err, tbl)
+              | length cond_err /= 0 -> (Left cond_err, tbl)
+              | length body_err /= 0 -> (Left body_err, tbl)
+              | otherwise ->
+                let
+                  filtered_cond = head' subbed_cond'
+                  expr = CT.SEFlow $ CT.FUntilStmt range n filtered_cond subbed_body'
                 in (Right expr, tbl)
 macroSub v tbl = (Right v, tbl)
 

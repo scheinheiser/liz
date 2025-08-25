@@ -17,7 +17,7 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.List.NonEmpty as NE
 
-import Data.List (mapAccumL)
+-- import Data.List (mapAccumL)
 import Data.Either (lefts, rights)
 import Data.Foldable (fold)
 
@@ -36,11 +36,13 @@ mkEnv :: Env
 mkEnv = Env {envFuncs = M.empty, envVars = M.empty, envConsts = M.empty, envLoops = S.empty}
 
 inferBody :: [CT.SExpr] -> Env -> [Either [E.SemErr] CT.Type]
-inferBody exprs env = 
-  reverse . snd . fst $ mapAccumL 
-    (\(env', acc) expr -> 
-      let (expr', env'') = infer expr env' in 
-      ((env'', expr' : acc), env'')) (env, []) (reverse exprs)
+inferBody = aux
+  where
+    aux :: [CT.SExpr] -> Env -> [Either [E.SemErr] CT.Type]
+    aux [] _ = []
+    aux (e : es) env =
+      let (res, env') = infer e env in
+      res : aux es env'
 
 analyseAndPrintErrs :: CT.Program -> FilePath -> String -> IO ()
 analyseAndPrintErrs prog f ftext =

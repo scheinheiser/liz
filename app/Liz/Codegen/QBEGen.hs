@@ -20,6 +20,7 @@ import Unsafe.Coerce (unsafeCoerce)
 import Data.Word
 import Data.Char (ord)
 
+-- helper QBEGen functions
 typeToPrim :: CT.Type -> Q.Prim
 typeToPrim CT.Int' = Q.PrimWord
 typeToPrim CT.Float' = Q.PrimSingle
@@ -27,6 +28,13 @@ typeToPrim CT.Bool' = Q.PrimWord
 typeToPrim CT.Char' = Q.PrimWord
 typeToPrim CT.String' = Q.PrimLong
 typeToPrim CT.Unit' = error "Attempted conversion of unit to primitive in codegen."
+
+getCond :: Expr -> Q.Value
+getCond v@((EVal _);(Ident _ _)) = fromBasicExpr v
+getCond (Bin vi _ _ _ _) = Q.VTemp $ Q.Ident @Q.Temp vi
+getCond (Un vi _ _ _) = Q.VTemp $ Q.Ident @Q.Temp vi
+getCond (FuncCall vi _ _ _) = Q.VTemp $ Q.Ident @Q.Temp vi
+getCond _ = error "Internal error - there should never be return/print/phi in condition."
 
 fromBasicExpr :: Expr -> Q.Value
 fromBasicExpr (Ident n isGlobal) = 
@@ -48,6 +56,7 @@ fromBasicExpr _ = error "Internal error - nested expressions must be flattened."
 ppQBE :: Q.Program -> IO ()
 ppQBE = putDoc . pretty
 
+-- main QBEGen functions
 irToQBE :: IR -> Q.Program
 irToQBE (IR funcs glbls strs _ _ _ symmap) =
   let
@@ -130,13 +139,6 @@ fromCFlow (IfStmt i cond main (Label (tlbl, tbody)) Nothing) symmap =
     tbody' = Q.Block tlbl' (foldMap (flip fromIROp symmap) tbody)
     cond_block = Q.Block i' (cond' <> [Q.Jump $ Q.Jnz (getCond $ last flattened_cond) tlbl' main'])
   in [cond_block, tbody']
-  where
-    getCond :: Expr -> Q.Value
-    getCond v@((EVal _);(Ident _ _)) = fromBasicExpr v
-    getCond (Bin vi _ _ _ _) = Q.VTemp $ Q.Ident @Q.Temp vi
-    getCond (Un vi _ _ _) = Q.VTemp $ Q.Ident @Q.Temp vi
-    getCond (FuncCall vi _ _ _) = Q.VTemp $ Q.Ident @Q.Temp vi
-    getCond _ = error "Internal error - there should never be return/print/phi in condition."
 fromCFlow (IfStmt i cond _ (Label (tlbl, tbody)) (Just (Label (flbl, fbody)))) symmap =
   let
     i'    = Q.Ident @Q.Label i
@@ -148,13 +150,17 @@ fromCFlow (IfStmt i cond _ (Label (tlbl, tbody)) (Just (Label (flbl, fbody)))) s
     fbody' = Q.Block flbl' (foldMap (flip fromIROp symmap) fbody)
     cond_block = Q.Block i' (cond' <> [Q.Jump $ Q.Jnz (getCond $ last flattened_cond) tlbl' flbl'])
   in [cond_block, tbody', fbody']
-  where
-    getCond :: Expr -> Q.Value
-    getCond v@((EVal _);(Ident _ _)) = fromBasicExpr v
-    getCond (Bin vi _ _ _ _) = Q.VTemp $ Q.Ident @Q.Temp vi
-    getCond (Un vi _ _ _) = Q.VTemp $ Q.Ident @Q.Temp vi
-    getCond (FuncCall vi _ _ _) = Q.VTemp $ Q.Ident @Q.Temp vi
-    getCond _ = error "Internal error - there should never be return/print/phi in condition."
+fromCFlow (UntilStmt i cond gotomain (gotoloop, exprs)) symmap =
+  let
+    i' = Q.Ident @Q.Label i
+    gotomain' = Q.Ident @Q.Label gotomain
+    gotoloop' = Q.Ident @Q.Label gotoloop
+
+    flattened_cond = flattenExpr cond
+    cond' = foldMap (flip fromExpr symmap) flattened_cond 
+    cond_block = Q.Block i' (cond' <> [Q.Jump $ Q.Jnz (getCond $ last flattened_cond) gotomain' gotoloop'])
+    exprs' = foldMap (flip fromCFlow symmap) exprs
+  in [cond_block] <> exprs'
 
 fromIROp :: IROp -> SymbolMap -> [Q.Instr]
 fromIROp (IRGoto n) _ = [Q.Jump $ Q.Jmp (Q.Ident @Q.Label n)]
@@ -244,4 +250,7 @@ fromExpr (Phi i t branches) _ =
     i' = Q.Assignment (Q.Ident @Q.Temp i) (Q.AbiPrim $ typeToPrim t)
     branches' = map (\(lbl, value) -> ((Q.Ident @Q.Label lbl), fromBasicExpr value)) branches
   in [Q.Phi i' (NE.fromList branches')]
+fromExpr (BreakStmt _ target) _ = 
+  let target' = Q.Ident @Q.Label target in
+  [Q.Jump $ Q.Jmp target']
 fromExpr e _ = error $ "Internal error - unhandled expression: " <> (show e)

@@ -15,9 +15,7 @@ import Data.Foldable (fold)
 
 inspectTerminators :: CT.Program -> Either [E.SemErr] CT.Program
 inspectTerminators (CT.Program funcs glbls macros) =
-  let
-    funcs' = checkReturns . insertReturns $ funcs
-  in
+  let funcs' = checkReturns . insertReturns $ funcs in
   if ((length . lefts $ funcs') /= 0)
   then Left $ fold . lefts $ funcs'
   else Right $ CT.Program (rights funcs') glbls macros

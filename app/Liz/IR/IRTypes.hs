@@ -41,12 +41,12 @@ data Expr = Bin T.Text CT.Type CT.BinaryOp Expr Expr
   | Un T.Text CT.Type CT.UnaryOp Expr
   | Ret Expr
   | Print Expr
-  | Phi T.Text CT.Type [(LabelIdent, Expr)] -- identifier - label names + the value associated with it
+  | Phi T.Text CT.Type [(LabelIdent, Expr)] -- identifier, label names + the value associated with it
   | FuncCall T.Text CT.Type T.Text [Expr]
   | Ident T.Text Bool -- name, flag if it's global.
   | EVal Val
   | Format T.Text (InternalStringIdent, T.Text) [Expr] -- interal buffer ident, (internal string ident, format string), format params
-  | BreakStmt T.Text
+  | BreakStmt T.Text LabelIdent
   deriving Show
 
 instance Pretty Expr where
@@ -76,7 +76,7 @@ instance Pretty Expr where
     let body = pretty fstr : (map pretty exprs) in
     (pretty n) <+> (pretty @T.Text "=") 
       <+> (pretty @T.Text "format") <> (parens . hsep $ punctuate comma body)
-  pretty (BreakStmt n) =
+  pretty (BreakStmt n _) =
     (pretty @T.Text "break") <+> (pretty n)
 
 type IRBlock = [CFlow]

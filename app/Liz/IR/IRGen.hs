@@ -109,7 +109,7 @@ fromCFlow (CT.FIfStmt _ cond tbranch (Just fbranch)) ir@IR{irCFlowIdx=fi} =
 fromCFlow (CT.FBlockStmt _ vals) ir@IR{irCFlowIdx=fi} =
   let 
     flowidx = "block$" <> (T.show fi)
-    (body, ir') = translateBody (reverse . NE.toList $ vals) ir
+    (body, ir') = translateBody (NE.toList $ vals) ir
   in
   (BlockStmt flowidx body, ir'{irCFlowIdx=fi + 1})
 fromCFlow (CT.FUntilStmt _ n cond body) ir@IR{irCFlowIdx=fi} =
@@ -211,12 +211,11 @@ fromExpr (CT.EFormat _ fstr params) ir =
     bufident = "fbuf" <> (T.show si) -- no need to increment, as it's different from typical strings
     bufstring = "__buffer:" <> (T.show $ T.length fstr + 1) -- increment for null terminator
     fstr' = "str" <> (T.show $ si + 1)
-    strs' = reverse $ (bufstring, bufident) : (fstr, fstr') : strs
+    strs' = (fstr, fstr') : (bufstring, bufident) : strs
   in
   (Format bufident (fstr', "\"" <> fstr <> "\"") params', ir'''{irStringIdx=si + 2, irAllocatedStrings=strs'})
-fromExpr (CT.EBreakStmt _ n) ir = (BreakStmt n, ir)
+fromExpr (CT.EBreakStmt _ n) ir = (BreakStmt ("until$" <> n) "blank", ir)
 
--- FIX: detect if there's nested if statements
 patchJumps :: [CFlow] -> IR -> [CFlow]
 patchJumps c = aux (reverse c)
   where
@@ -249,12 +248,30 @@ patchJumps c = aux (reverse c)
       Lbl $ Label (n, patched_exprs)
     patchCFlow (UntilStmt id' cond _ (_, exprs)) next ir =
       let patched_exprs = aux exprs ir in
-      UntilStmt id' cond next (getLabel $ head' patched_exprs, patched_exprs)
+      UntilStmt id' cond next (getLabel $ head' patched_exprs, patchBreaks patched_exprs next)
       where
+        getLabel :: CFlow -> T.Text
         getLabel (IfStmt i _ _ _ _) = i
         getLabel (BlockStmt i _) = i
         getLabel (Lbl (Label (i, _))) = i
         getLabel (UntilStmt i _ _ _) = i
+
+        patchBreaks :: [CFlow] -> T.Text -> [CFlow]
+        patchBreaks [] _ = []
+        patchBreaks (IfStmt n cond' gotomain (Label (branch, bexprs)) Nothing : cs) next' =
+          IfStmt n cond' gotomain (Label (branch, map (patchBreak next') bexprs)) Nothing : patchBreaks cs next'
+        patchBreaks (IfStmt n cond' gotomain (Label (tbranch, texprs)) (Just (Label (fbranch, fexprs))) : cs) next' =
+          IfStmt n cond' gotomain (Label (tbranch, map (patchBreak next') texprs)) (Just $ Label (fbranch, reverse . map (patchBreak next') $ fexprs)) : patchBreaks cs next'
+        patchBreaks (Lbl (Label (i, lexprs)) : cs) next' =
+          (Lbl $ Label (i, map (patchBreak next') lexprs)) : patchBreaks cs next'
+        patchBreaks (BlockStmt i bexprs : cs) next' =
+          BlockStmt i (patchBreaks bexprs next') : patchBreaks cs next'
+        patchBreaks (UntilStmt i cond' gotomain (gotoloop, bexprs) : cs) next' =
+          UntilStmt i cond' gotomain (gotoloop, patchBreaks bexprs next') : patchBreaks cs next'
+
+        patchBreak :: T.Text -> IROp -> IROp
+        patchBreak next' (IRExpr (BreakStmt loop _)) = IRExpr $ BreakStmt loop next'
+        patchBreak _ expr = expr
 
 -- TODO: change to return nonempty
 flattenExpr :: Expr -> [Expr]
@@ -310,9 +327,12 @@ programToIR (CT.Program funcs glbls _) =
     funcsToIR ((CT.Func ident _ args ret body) : fs) ir'' acc =
       let
         (body', ir''') = translateBody body ir''
-        body'' = patchJumps body' ir'''
-        body''' = flattenBody body''
-        func = Fn ident args (body''') ret
+        body'' =
+          case (head' body') of
+            (UntilStmt _ _ _ _) -> [(Lbl $ Label ("start", []))] <> body'
+            _ -> body'
+        body''' = flattenBody . patchJumps (reverse body'') $ ir'''
+        func = Fn ident args body''' ret
       in funcsToIR fs ir''' (func : acc)
 
     flattenIROp :: [IROp] -> [IROp]
